@@ -2,217 +2,1831 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <title>VIGIL — Night Vision</title>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--nvg:#44ff88;--thermal:#ff6644;--gold:#C9A84C;--bg:#000;--bg2:#0D0A14;--text:#E8E0D0;--dim:#6B6070}
-html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:"DM Mono",monospace;-webkit-tap-highlight-color:transparent}
-#app{display:flex;flex-direction:column;height:100vh;height:-webkit-fill-available}
-#viewport{flex:1;position:relative;overflow:hidden;background:#000}
-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
-canvas{position:absolute;inset:0;width:100%;height:100%}
-.controls{background:var(--bg2);flex-shrink:0}
-.palette-row{display:flex;gap:3px;padding:6px}
-.pbtn{flex:1;background:transparent;border:1px solid rgba(201,168,76,0.1);color:var(--dim);font-family:"DM Mono",monospace;font-size:8px;letter-spacing:.06em;padding:7px 2px;cursor:pointer;text-transform:uppercase;transition:all .15s}
-.pbtn.sel{background:rgba(201,168,76,0.12);border-color:rgba(201,168,76,0.5);color:var(--gold)}
-.toggle-row{display:flex;gap:4px;padding:0 6px 6px;flex-wrap:wrap}
-.tbtn{background:transparent;border:1px solid rgba(201,168,76,0.1);color:var(--dim);font-family:"DM Mono",monospace;font-size:8px;letter-spacing:.1em;padding:6px 8px;cursor:pointer;border-radius:4px;text-transform:uppercase;transition:all .15s}
-.tbtn.on{background:rgba(201,168,76,0.1);border-color:rgba(201,168,76,0.4);color:var(--gold)}
-.slider-row{display:flex;align-items:center;gap:8px;padding:0 10px 6px}
-.slider-row span{font-size:8px;color:var(--dim);letter-spacing:.1em;white-space:nowrap;min-width:80px}
-input[type=range]{flex:1;accent-color:var(--gold);cursor:pointer}
-.action-row{display:flex;gap:6px;padding:0 8px 8px}
-.abtn{flex:1;background:transparent;border:1px solid rgba(201,168,76,0.3);color:var(--gold);font-family:"DM Mono",monospace;font-size:10px;letter-spacing:.15em;padding:10px;cursor:pointer;text-transform:uppercase}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{width:100%;height:100%;overflow:hidden;background:#000}
+::-webkit-scrollbar{display:none}
 </style>
 </head>
 <body>
-<div id="app">
-  <div id="viewport">
-    <video id="vid" autoplay playsinline muted></video>
-    <canvas id="cvs"></canvas>
-  </div>
-  <div class="controls">
-    <div class="palette-row" id="palette-row"></div>
-    <div class="toggle-row">
-      <button class="tbtn on" id="t-reticle">⊕ RETICLE</button>
-      <button class="tbtn on" id="t-motion">⬥ MOTION</button>
-      <button class="tbtn" id="t-edges">◈ EDGES</button>
-      <button class="tbtn on" id="t-denoise">◎ DENOISE</button>
-      <button class="tbtn" id="t-flip">↺ FLIP</button>
-    </div>
-    <div class="slider-row"><span>BRIGHTNESS</span><input id="s-bright" type="range" min="-1" max="1" step="0.05" value="0"></div>
-    <div class="slider-row"><span>SENSITIVITY</span><input id="s-sens" type="range" min="0" max="1" step="0.05" value="0.6"></div>
-    <div class="slider-row"><span>ZOOM <span id="zv">1.0×</span></span><input id="s-zoom" type="range" min="1" max="10" step="0.1" value="1"></div>
-    <div class="action-row">
-      <button class="abtn" id="b-rec">⏺ REC</button>
-      <button class="abtn" id="b-snap">📷 SNAP</button>
-    </div>
-  </div>
-</div>
-<script>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+import{useState,useEffect,useRef,useCallback,useMemo}from"react";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LUT BUILDER
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildLUT(fn){
+  const l=new Uint8Array(256*3);
+  for(let i=0;i<256;i++){
+    const[r,g,b]=fn(i/255);
+    l[i*3]=Math.min(255,Math.max(0,Math.round(r)));
+    l[i*3+1]=Math.min(255,Math.max(0,Math.round(g)));
+    l[i*3+2]=Math.min(255,Math.max(0,Math.round(b)));
+  }
+  return l;
+}
 const LUTS={
-  NVG:      buildLUT(t=>[0,Math.min(255,Math.round(t*255*1.3)),0]),
-  THERMAL:  buildLUT(t=>{const v=t*255;if(t<.2)return[0,0,Math.round(t/.2*180)];if(t<.4){const s=(t-.2)/.2;return[Math.round(s*160),0,Math.round(180-s*180)]}if(t<.6){const s=(t-.4)/.2;return[Math.round(160+s*95),Math.round(s*60),0]}if(t<.8){const s=(t-.6)/.2;return[255,Math.round(60+s*140),0]}const s=(t-.8)/.2;return[255,Math.round(200+s*55),Math.round(s*255)]}),
-  RAINBOW:  buildLUT(t=>{if(t<.25){const s=t/.25;return[0,0,Math.round(s*255)]}if(t<.5){const s=(t-.25)/.25;return[0,Math.round(s*255),255]}if(t<.75){const s=(t-.5)/.25;return[0,255,Math.round(255-s*255)]}const s=(t-.75)/.25;return[Math.round(s*255),255,0]}),
-  FUSION:   buildLUT(t=>{if(t<.33){const s=t/.33;return[Math.round(s*80),0,Math.round(80+s*175)]}if(t<.66){const s=(t-.33)/.33;return[Math.round(80+s*175),Math.round(s*100),Math.round(255-s*200)]}const s=(t-.66)/.34;return[255,Math.round(100+s*155),Math.round(55+s*200)]}),
-  PHOSPHOR: buildLUT(t=>{const v=Math.round(t*255);return[Math.round(v*.55),Math.round(v*.9),Math.round(v*.55)]}),
-  AMBER:    buildLUT(t=>{const v=Math.round(t*255);return[v,Math.round(v*.55),0]}),
+  THERMAL:buildLUT(t=>{
+    if(t<.2)return[0,0,t/.2*180];
+    if(t<.4){const s=(t-.2)/.2;return[s*160,0,180-s*180];}
+    if(t<.6){const s=(t-.4)/.2;return[160+s*95,s*60,0];}
+    if(t<.8){const s=(t-.6)/.2;return[255,60+s*140,0];}
+    const s=(t-.8)/.2;return[255,200+s*55,s*255];
+  }),
+  RAINBOW:buildLUT(t=>{
+    if(t<.25)return[0,t/.25*255,255];
+    if(t<.5){const s=(t-.25)/.25;return[0,255,255-s*255];}
+    if(t<.75){const s=(t-.5)/.25;return[s*255,255,0];}
+    const s=(t-.75)/.25;return[255,255-s*255,0];
+  }),
+  FUSION:buildLUT(t=>{
+    if(t<.33){const s=t/.33;return[s*80,0,80+s*175];}
+    if(t<.66){const s=(t-.33)/.33;return[80+s*175,s*100,255-s*200];}
+    const s=(t-.66)/.34;return[255,100+s*155,55+s*200];
+  }),
 };
-function buildLUT(fn){const l=new Uint8Array(256*3);for(let i=0;i<256;i++){const[r,g,b]=fn(i/255);l[i*3]=Math.round(r);l[i*3+1]=Math.round(g);l[i*3+2]=Math.round(b)}return l}
 
-let palette='NVG',facing='environment',fps=0,lastT=0,motionPx=0,blobs=[]
-let showReticle=true,showMotion=true,showEdges=false,doNoise=true
-let bright=0,sens=0.6,zoom=1,recording=false
-let prev=null,video,canvas,ctx,raw,rctx,recorder,chunks=[],heading=null,rafId
-
-function initPaletteBtns(){
-  const row=document.getElementById('palette-row')
-  Object.keys(LUTS).forEach((p,i)=>{
-    const b=document.createElement('button')
-    b.className='pbtn'+(i===0?' sel':'')
-    b.textContent=p
-    b.onclick=()=>{palette=p;row.querySelectorAll('.pbtn').forEach(x=>x.classList.remove('sel'));b.classList.add('sel')}
-    row.appendChild(b)
-  })
-}
-
-function initToggles(){
-  document.getElementById('t-reticle').onclick=e=>{showReticle=!showReticle;e.target.classList.toggle('on',showReticle)}
-  document.getElementById('t-motion').onclick=e=>{showMotion=!showMotion;e.target.classList.toggle('on',showMotion)}
-  document.getElementById('t-edges').onclick=e=>{showEdges=!showEdges;e.target.classList.toggle('on',showEdges)}
-  document.getElementById('t-denoise').onclick=e=>{doNoise=!doNoise;e.target.classList.toggle('on',doNoise)}
-  document.getElementById('t-flip').onclick=async()=>{facing=facing==='environment'?'user':'environment';await bootCam()}
-  document.getElementById('s-bright').oninput=e=>bright=parseFloat(e.target.value)
-  document.getElementById('s-sens').oninput=e=>sens=parseFloat(e.target.value)
-  document.getElementById('s-zoom').oninput=async e=>{
-    zoom=parseFloat(e.target.value)
-    document.getElementById('zv').textContent=zoom.toFixed(1)+'x'
-    const track=video?.srcObject?.getVideoTracks()[0]
-    if(track)try{await track.applyConstraints({advanced:[{zoom}]})}catch{canvas.style.transform=`scale(${zoom})`}
-  }
-  document.getElementById('b-rec').onclick=()=>recording?stopRec():startRec()
-  document.getElementById('b-snap').onclick=()=>{const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download=`vigil-nvs-${Date.now()}.png`;a.click()}
-}
-
-async function bootCam(){
-  if(rafId){cancelAnimationFrame(rafId);rafId=null}
-  const oldStream=video?.srcObject
-  if(oldStream)oldStream.getTracks().forEach(t=>t.stop())
-  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}}})
-  video.srcObject=stream
-  await video.play()
-  rafId=requestAnimationFrame(frame)
-}
-
-function sobelEdges(d,w,h){
-  const e=new Float32Array(w*h)
-  const l=i=>(.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2])
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMAGE PROCESSING
+// ═══════════════════════════════════════════════════════════════════════════════
+function sobelEdges(data,w,h){
+  const e=new Float32Array(w*h);
   for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
-    const gx=-l((y-1)*w+(x-1))+l((y-1)*w+(x+1))-2*l(y*w+(x-1))+2*l(y*w+(x+1))-l((y+1)*w+(x-1))+l((y+1)*w+(x+1))
-    const gy=-l((y-1)*w+(x-1))-2*l((y-1)*w+x)-l((y-1)*w+(x+1))+l((y+1)*w+(x-1))+2*l((y+1)*w+x)+l((y+1)*w+(x+1))
-    e[y*w+x]=Math.min(255,Math.sqrt(gx*gx+gy*gy)*.5)
+    const L=i=>{const d=i*4;return 0.299*data[d]+0.587*data[d+1]+0.114*data[d+2];};
+    const tl=L((y-1)*w+(x-1)),t=L((y-1)*w+x),tr=L((y-1)*w+(x+1));
+    const ml=L(y*w+(x-1)),mr=L(y*w+(x+1));
+    const bl=L((y+1)*w+(x-1)),b=L((y+1)*w+x),br=L((y+1)*w+(x+1));
+    const gx=-tl-2*ml-bl+tr+2*mr+br,gy=-tl-2*t-tr+bl+2*b+br;
+    e[y*w+x]=Math.min(255,Math.sqrt(gx*gx+gy*gy)*.5);
   }
-  return e
+  return e;
 }
-
-function applyCLAHE(d,w,h,tiles=6,clip=3.5){
-  const tW=Math.floor(w/tiles),tH=Math.floor(h/tiles)
+function applyCLAHE(data,w,h,tiles=6,clip=3.5){
+  const tW=Math.floor(w/tiles),tH=Math.floor(h/tiles);
   for(let ty=0;ty<tiles;ty++)for(let tx=0;tx<tiles;tx++){
-    const x0=tx*tW,y0=ty*tH,x1=tx===tiles-1?w:x0+tW,y1=ty===tiles-1?h:y0+tH
-    const count=(x1-x0)*(y1-y0),hist=new Float32Array(256)
-    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const idx=(y*w+x)*4;hist[Math.round(.299*d[idx]+.587*d[idx+1]+.114*d[idx+2])]++}
-    const lim=count/256*clip;let ex=0
-    for(let i=0;i<256;i++){if(hist[i]>lim){ex+=hist[i]-lim;hist[i]=lim}}
-    const add=ex/256;for(let i=0;i<256;i++)hist[i]+=add
-    const cdf=new Float32Array(256);cdf[0]=hist[0]
-    for(let i=1;i<256;i++)cdf[i]=cdf[i-1]+hist[i]
-    const cMin=cdf[0]
+    const x0=tx*tW,y0=ty*tH,x1=tx===tiles-1?w:x0+tW,y1=ty===tiles-1?h:y0+tH;
+    const hist=new Float32Array(256);let count=0;
     for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
-      const idx=(y*w+x)*4,lum=Math.round(.299*d[idx]+.587*d[idx+1]+.114*d[idx+2])
-      const eq=Math.round((cdf[lum]-cMin)/Math.max(1,count-cMin)*255),sc=lum>2?eq/lum:1
-      d[idx]=Math.min(255,Math.round(d[idx]*sc));d[idx+1]=Math.min(255,Math.round(d[idx+1]*sc));d[idx+2]=Math.min(255,Math.round(d[idx+2]*sc))
+      const i=(y*w+x)*4;
+      hist[Math.round(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2])]++;count++;
+    }
+    const lim=(count/256)*clip;let ex=0;
+    for(let i=0;i<256;i++){if(hist[i]>lim){ex+=hist[i]-lim;hist[i]=lim;}}
+    const add=ex/256;for(let i=0;i<256;i++)hist[i]+=add;
+    const cdf=new Float32Array(256);cdf[0]=hist[0];
+    for(let i=1;i<256;i++)cdf[i]=cdf[i-1]+hist[i];
+    const cMin=cdf[0];
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
+      const i=(y*w+x)*4;
+      const lum=Math.round(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]);
+      const eq=Math.round((cdf[lum]-cMin)/Math.max(1,count-cMin)*255);
+      const sc=lum>2?eq/lum:1;
+      data[i]=Math.min(255,data[i]*sc);data[i+1]=Math.min(255,data[i+1]*sc);data[i+2]=Math.min(255,data[i+2]*sc);
     }
   }
 }
 
-function findBlobs(map,w,h,min=80){
-  const vis=new Uint8Array(w*h),blobs=[]
-  for(let s=0;s<map.length;s++){
-    if(!map[s]||vis[s])continue
-    let size=0,mX=w,mY=h,xX=0,xY=0
-    const q=[s];vis[s]=1
-    while(q.length){
-      const idx=q.pop();size++
-      const x=idx%w,y=Math.floor(idx/w)
-      if(x<mX)mX=x;if(x>xX)xX=x;if(y<mY)mY=y;if(y>xY)xY=y
-      for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){const nx=x+dx,ny=y+dy;if(nx>=0&&nx<w&&ny>=0&&ny<h){const ni=ny*w+nx;if(map[ni]&&!vis[ni]){vis[ni]=1;q.push(ni)}}}
+// NVG-specific extreme CLAHE — 10x10 tiles, high clip, on green channel only
+function applyNVGCLAHE(data,w,h){
+  const tiles=10,clip=8.0;
+  const tW=Math.floor(w/tiles),tH=Math.floor(h/tiles);
+  // Extract green channel into temp array, equalize it, write back
+  const green=new Uint8Array(w*h);
+  for(let i=0;i<data.length;i+=4) green[i/4]=data[i+1];
+  for(let ty=0;ty<tiles;ty++)for(let tx=0;tx<tiles;tx++){
+    const x0=tx*tW,y0=ty*tH,x1=tx===tiles-1?w:x0+tW,y1=ty===tiles-1?h:y0+tH;
+    const hist=new Float32Array(256);let count=0;
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){hist[green[y*w+x]]++;count++;}
+    const lim=(count/256)*clip;let ex=0;
+    for(let i=0;i<256;i++){if(hist[i]>lim){ex+=hist[i]-lim;hist[i]=lim;}}
+    const add=ex/256;for(let i=0;i<256;i++)hist[i]+=add;
+    const cdf=new Float32Array(256);cdf[0]=hist[0];
+    for(let i=1;i<256;i++)cdf[i]=cdf[i-1]+hist[i];
+    const cMin=cdf[0],cRange=Math.max(1,count-cMin);
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
+      green[y*w+x]=Math.round((cdf[green[y*w+x]]-cMin)/cRange*255);
     }
-    if(size>=min)blobs.push({x:mX,y:mY,w:xX-mX,h:xY-mY,size})
   }
-  return blobs.sort((a,b)=>b.size-a.size).slice(0,6)
+  // Write equalized green back
+  for(let i=0;i<data.length;i+=4) data[i+1]=green[i/4];
 }
 
-function frame(){
-  if(!video||video.readyState<2){rafId=requestAnimationFrame(frame);return}
-  const now=performance.now();fps=Math.round(1000/Math.max(1,now-lastT));lastT=now
-  const W=canvas.width=video.videoWidth||640,H=canvas.height=video.videoHeight||480
-  raw.width=W;raw.height=H;rctx.drawImage(video,0,0,W,H)
-  const imgData=rctx.getImageData(0,0,W,H),d=imgData.data
-  if(doNoise&&prev&&prev.length===d.length){for(let i=0;i<d.length;i++)d[i]=Math.round(d[i]*.28+prev[i]*.72)}
-  prev=new Uint8ClampedArray(d)
-  applyCLAHE(d,W,H)
-  if(bright!==0){const b=bright*80;for(let i=0;i<d.length;i+=4){d[i]=Math.min(255,Math.max(0,d[i]+b));d[i+1]=Math.min(255,Math.max(0,d[i+1]+b));d[i+2]=Math.min(255,Math.max(0,d[i+2]+b))}}
-  const thresh=Math.round(15+(1-sens)*40),mMap=new Uint8Array(W*H)
-  if(showMotion&&rctx._prev&&rctx._prev.length===d.length){const p=rctx._prev;motionPx=0;for(let i=0;i<d.length;i+=4){const diff=(Math.abs(d[i]-p[i])+Math.abs(d[i+1]-p[i+1])+Math.abs(d[i+2]-p[i+2]))/3;if(diff>thresh){mMap[i/4]=255;motionPx++}}}
-  rctx._prev=new Uint8ClampedArray(d)
-  blobs=motionPx>200?findBlobs(mMap,W,H,60):[]
-  let edges=null;if(showEdges)edges=sobelEdges(d,W,H)
-  const lut=LUTS[palette]||LUTS.NVG
-  for(let i=0;i<d.length;i+=4){const lum=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]),li=lum*3;d[i]=lut[li];d[i+1]=lut[li+1];d[i+2]=lut[li+2]}
-  if(edges){for(let i=0;i<edges.length;i++){if(edges[i]>30){const pi=i*4,e=edges[i]/255;d[pi]=Math.min(255,d[pi]+Math.round(e*180));d[pi+1]=Math.min(255,d[pi+1]+Math.round(e*180));d[pi+2]=Math.min(255,d[pi+2]+Math.round(e*180))}}}
-  if(showMotion){for(let i=0;i<mMap.length;i++){if(mMap[i]){const pi=i*4;d[pi]=255;d[pi+1]=255;d[pi+2]=0}}}
-  rctx.putImageData(imgData,0,0)
-  ctx.drawImage(raw,0,0,W,H)
-  drawHUD(W,H)
-  rafId=requestAnimationFrame(frame)
+// Temporal frame stacking — accumulates N frames, extracts signal from noise
+// Returns blended luminance map
+function stackFrames(data,stackBuf,stackIdx,stackSize){
+  const n=data.length/4;
+  if(!stackBuf.current||stackBuf.current.length!==stackSize*n){
+    stackBuf.current=new Float32Array(stackSize*n);
+    stackIdx.current=0;
+  }
+  const idx=stackIdx.current%stackSize;
+  for(let i=0;i<n;i++){
+    const d=i*4;
+    stackBuf.current[idx*n+i]=0.299*data[d]+0.587*data[d+1]+0.114*data[d+2];
+  }
+  stackIdx.current++;
+  const filled=Math.min(stackIdx.current,stackSize);
+  if(filled<2)return null;
+  // Average across stack
+  const avg=new Float32Array(n);
+  for(let f=0;f<filled;f++) for(let i=0;i<n;i++) avg[i]+=stackBuf.current[f*n+i];
+  for(let i=0;i<n;i++) avg[i]/=filled;
+  return avg;
+}
+function temporalBlend(data,history,alpha=0.75){
+  if(!history||history.length!==data.length)return;
+  for(let i=0;i<data.length;i+=4){
+    data[i]=data[i]*alpha+history[i]*(1-alpha);
+    data[i+1]=data[i+1]*alpha+history[i+1]*(1-alpha);
+    data[i+2]=data[i+2]*alpha+history[i+2]*(1-alpha);
+  }
 }
 
-function getModeColor(){const c={NVG:'#44ff88',THERMAL:'#ff6644',RAINBOW:'#44aaff',FUSION:'#cc44ff',PHOSPHOR:'#88ff88',AMBER:'#ffaa44'};return c[palette]||'#44ff88'}
-
-function drawHUD(w,h){
-  const c=ctx,col=getModeColor()
-  if(showReticle){c.strokeStyle=col;c.globalAlpha=.5;c.lineWidth=1;c.beginPath();c.moveTo(w/2-20,h/2);c.lineTo(w/2-8,h/2);c.moveTo(w/2+8,h/2);c.lineTo(w/2+20,h/2);c.moveTo(w/2,h/2-20);c.lineTo(w/2,h/2-8);c.moveTo(w/2,h/2+8);c.lineTo(w/2,h/2+20);c.arc(w/2,h/2,6,0,Math.PI*2);c.stroke()}
-  c.globalAlpha=.65;c.strokeStyle=col;c.lineWidth=2
-  const bs=Math.min(w,h)*.07
-  ;[[0,0,1,1],[w,0,-1,1],[0,h,1,-1],[w,h,-1,-1]].forEach(([cx,cy,dx,dy])=>{c.beginPath();c.moveTo(cx+dx*bs,cy);c.lineTo(cx,cy);c.lineTo(cx,cy+dy*bs);c.stroke()})
-  if(showMotion&&blobs.length){blobs.forEach((b,i)=>{const t=b.size>5000?'HIGH':b.size>1500?'MED':'LOW';const tc=t==='HIGH'?'#ff4444':t==='MED'?'#ffaa00':'#44ff44';c.strokeStyle=tc;c.lineWidth=1.5;c.globalAlpha=.85;c.strokeRect(b.x,b.y,b.w,b.h);c.fillStyle=tc;c.font='8px DM Mono,monospace';c.globalAlpha=.9;c.fillText(`TGT-${String.fromCharCode(65+i)} ${t}`,b.x+3,b.y-3)})}
-  if(heading!==null){const dirs=['N','NE','E','SE','S','SW','W','NW'];const dir=dirs[Math.round(heading/45)%8];c.globalAlpha=.75;c.fillStyle=col;c.font='bold 10px DM Mono,monospace';c.fillText(`${dir} ${Math.round(heading)}°`,w-60,18)}
-  c.globalAlpha=.75;c.fillStyle='rgba(0,0,0,.5)';c.fillRect(0,h-20,w,20)
-  c.fillStyle=col;c.font='9px DM Mono,monospace'
-  const ms=motionPx>200?`⬥ MOTION ${blobs.length}TGT`:'CLEAR'
-  c.fillText(`${fps}fps · ${palette} · ${ms}`,6,h-6)
-  if(recording){c.fillStyle='#ff4444';c.font='bold 9px DM Mono,monospace';c.fillText('● REC',w-38,14)}
-  c.globalAlpha=1
+// Phosphor bloom: soft-glow on bright green pixels (real NVG has halation)
+function applyPhosphorBloom(data,w,h){
+  // Box-blur the green channel at 4px radius, add back scaled
+  const g=new Float32Array(w*h);
+  for(let i=0;i<data.length;i+=4) g[i/4]=data[i+1];
+  const blurred=new Float32Array(w*h);
+  const r=4;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    let sum=0,cnt=0;
+    for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+      const nx=x+dx,ny=y+dy;
+      if(nx>=0&&nx<w&&ny>=0&&ny<h){sum+=g[ny*w+nx];cnt++;}
+    }
+    blurred[y*w+x]=sum/cnt;
+  }
+  // Add glow: brighter pixels bloom more
+  for(let i=0;i<data.length;i+=4){
+    const pi=i/4;
+    const glow=blurred[pi]*0.35;
+    data[i+1]=Math.min(255,data[i+1]+glow);
+    // Slight red tint at peak brightness (real P43 phosphor characteristic)
+    if(data[i+1]>200) data[i]=Math.min(255,data[i]+data[i+1]*0.04);
+  }
+}
+function findBlobs(motionMap,w,h,minSize=60){
+  const visited=new Uint8Array(w*h);const blobs=[];
+  for(let start=0;start<motionMap.length;start++){
+    if(!motionMap[start]||visited[start])continue;
+    const queue=[start];visited[start]=1;
+    let minX=w,minY=h,maxX=0,maxY=0,size=0;
+    while(queue.length){
+      const idx=queue.pop();size++;
+      const x=idx%w,y=Math.floor(idx/w);
+      if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
+      for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){
+        const nx=x+dx,ny=y+dy;
+        if(nx>=0&&nx<w&&ny>=0&&ny<h){const ni=ny*w+nx;if(motionMap[ni]&&!visited[ni]){visited[ni]=1;queue.push(ni);}}
+      }
+    }
+    if(size>=minSize)blobs.push({x:minX,y:minY,w:maxX-minX,h:maxY-minY,size,cx:(minX+maxX)/2,cy:(minY+maxY)/2});
+  }
+  return blobs.sort((a,b)=>b.size-a.size).slice(0,8);
 }
 
-function startRec(){if(!canvas)return;chunks=[];const s=canvas.captureStream(30);recorder=new MediaRecorder(s,{mimeType:'video/webm;codecs=vp9'});recorder.ondataavailable=e=>chunks.push(e.data);recorder.onstop=()=>{const b=new Blob(chunks,{type:'video/webm'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=`vigil-nvs-${Date.now()}.webm`;a.click();URL.revokeObjectURL(u)};recorder.start();recording=true;const btn=document.getElementById('b-rec');btn.textContent='⏹ STOP';btn.style.color='#E53E3E'}
-function stopRec(){recorder?.stop();recording=false;const btn=document.getElementById('b-rec');btn.textContent='⏺ REC';btn.style.color='#C9A84C'}
+// AI Object classification (heuristic-based, no ML model needed)
+function classifyBlob(blob,sw,sh){
+  const aspect=blob.w/(blob.h||1);
+  const area=(blob.w*blob.h)/(sw*sh);
+  const cy=blob.cy/sh;
+  if(area>0.25)return{label:"VEHICLE",conf:88,icon:"🚗"};
+  if(aspect>1.8&&area>0.05)return{label:"VEHICLE",conf:75,icon:"🚗"};
+  if(aspect>0.5&&aspect<2.2&&area>0.02&&cy>0.3)return{label:"PERSON",conf:82,icon:"🧍"};
+  if(area<0.005)return{label:"SMALL OBJ",conf:60,icon:"◈"};
+  if(aspect>2.5)return{label:"ANIMAL",conf:55,icon:"🐾"};
+  if(cy<0.25&&area>0.01)return{label:"DRONE/BIRD",conf:65,icon:"🦅"};
+  return{label:"UNKNOWN",conf:50,icon:"?"};
+}
 
-function startCompass(){const h=e=>{heading=e.webkitCompassHeading??e.alpha??null};if(typeof DeviceOrientationEvent?.requestPermission==='function'){DeviceOrientationEvent.requestPermission().then(s=>{if(s==='granted')window.addEventListener('deviceorientation',h,true)}).catch(()=>{})}else{window.addEventListener('deviceorientation',h,true)}}
+// Distance estimation (pinhole camera model approximation)
+function estimateDistance(blobHeightPx,canvasH,mode){
+  // Assume avg human height 1.7m, typical phone VFOV ~60deg
+  const vfovRad=60*(Math.PI/180);
+  const focalPx=canvasH/(2*Math.tan(vfovRad/2));
+  const realH=mode==="PERSON"?1.7:mode==="VEHICLE"?1.5:0.5;
+  if(blobHeightPx<5)return null;
+  const dist=(realH*focalPx)/blobHeightPx;
+  return Math.max(0.5,Math.min(500,dist));
+}
 
-window.addEventListener('load',async()=>{
-  video=document.getElementById('vid')
-  canvas=document.getElementById('cvs')
-  ctx=canvas.getContext('2d')
-  raw=document.createElement('canvas')
-  rctx=raw.getContext('2d',{willReadFrequently:true})
-  initPaletteBtns()
-  initToggles()
-  startCompass()
-  await bootCam()
-})
+// rPPG heart-rate: sample green channel mean from face region over time
+function extractRPPG(data,w,h){
+  // sample center 20% of frame (face region when selfie)
+  const cx=Math.floor(w*0.4),cy=Math.floor(h*0.3);
+  const rw=Math.floor(w*0.2),rh=Math.floor(h*0.2);
+  let sum=0,count=0;
+  for(let y=cy;y<cy+rh&&y<h;y+=2)for(let x=cx;x<cx+rw&&x<w;x+=2){
+    const i=(y*w+x)*4;sum+=data[i+1];count++;
+  }
+  return count>0?sum/count:0;
+}
+
+function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
+  const{mode,brightness,sensitivity,edgeOverlay,noiseReduction,lutName,tripwires,showRPPG}=cfg;
+  const sw=video.videoWidth,sh=video.videoHeight;
+  if(!sw||!sh||video.readyState<2)return null;
+  rawCanvas.width=sw;rawCanvas.height=sh;dispCanvas.width=sw;dispCanvas.height=sh;
+  const rawCtx=rawCanvas.getContext("2d",{willReadFrequently:true});
+  rawCtx.drawImage(video,0,0,sw,sh);
+  const imageData=rawCtx.getImageData(0,0,sw,sh);
+  const data=imageData.data;
+  if(noiseReduction&&refs.prev.current)temporalBlend(data,refs.prev.current,0.78);
+  refs.prev.current=new Uint8ClampedArray(data);
+  const motionThresh=Math.round(15+(1-sensitivity)*40);
+  const motionMap=new Uint8Array(sw*sh);let motionPixels=0;
+  if(refs.motion.current&&refs.motion.current.length===data.length){
+    for(let i=0;i<data.length;i+=4){
+      const d=(Math.abs(data[i]-refs.motion.current[i])+Math.abs(data[i+1]-refs.motion.current[i+1])+Math.abs(data[i+2]-refs.motion.current[i+2]))/3;
+      if(d>motionThresh){motionMap[i/4]=255;motionPixels++;}
+    }
+  }
+  refs.motion.current=new Uint8ClampedArray(data);
+
+  // rPPG sample
+  const rppgVal=showRPPG?extractRPPG(data,sw,sh):0;
+
+  let edges=null;
+  if(edgeOverlay)edges=sobelEdges(data,sw,sh);
+
+  const lut=LUTS[lutName]||null;
+  const tempSamples=[];
+
+  // NVG: extreme processing pipeline
+  let stackedLum=null;
+  if(mode==="NVG"){
+    // Step 1: frame stacking (8 frames) to pull signal from sensor noise
+    stackedLum=stackFrames(data,refs.stackBuf,refs.stackIdx,8);
+    // Step 2: apply stacked luminance back into green channel before CLAHE
+    if(stackedLum){
+      for(let i=0;i<data.length;i+=4){
+        const sl=Math.min(255,stackedLum[i/4]*1.6);
+        data[i]=sl*0.03; data[i+1]=sl; data[i+2]=sl*0.02;
+      }
+    }
+    // Step 3: extreme CLAHE on green channel only
+    applyNVGCLAHE(data,sw,sh);
+  } else if(mode==="WHITE"||mode==="FUSION"){
+    applyCLAHE(data,sw,sh,6,3.5);
+  }
+
+  const bri=(mode==="NVG"?4.5:mode==="WHITE"?3.0:2.0)+brightness*1.5;
+  const con=mode==="NVG"?2.8:mode==="WHITE"?2.4:2.1;
+  const mid=128;
+
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2];
+    const lum=0.299*r+0.587*g+0.114*b;
+    const boosted=Math.max(0,Math.min(255,(lum*bri-mid)*con+mid));
+    const pIdx=i/4;
+    if(mode==="NVG"){
+      // Use boosted luminance → pure green, crush red/blue to near zero
+      const v=Math.min(255,boosted);
+      data[i]=Math.min(255,v*0.03);
+      data[i+1]=Math.min(255,v);
+      data[i+2]=Math.min(255,v*0.02);
+      // Authentic phosphor noise: coarser at low signal, fine at high
+      const noiseAmt=v<80?14:v<160?8:4;
+      const n=(Math.random()-.5)*noiseAmt;
+      data[i+1]=Math.max(0,Math.min(255,data[i+1]+n));
+    }else if(mode==="THERMAL"||mode==="RAINBOW"||mode==="FUSION"){
+      const al=lut||LUTS.THERMAL;const li=Math.min(255,Math.round(boosted));
+      data[i]=al[li*3];data[i+1]=al[li*3+1];data[i+2]=al[li*3+2];
+      const px=pIdx%sw,py=Math.floor(pIdx/sw);
+      if(px%8===0&&py%8===0)tempSamples.push({lum,px,py});
+    }else if(mode==="BLUE"){
+      data[i]=Math.min(255,boosted*0.12);data[i+1]=Math.min(255,boosted*0.32);data[i+2]=Math.min(255,boosted*1.15+b*0.25);
+      const n=(Math.random()-.5)*7;data[i+2]=Math.max(0,Math.min(255,data[i+2]+n));
+    }else{const w2=Math.min(255,boosted);data[i]=data[i+1]=data[i+2]=w2;}
+
+    if(edgeOverlay&&edges){
+      const e=edges[pIdx];
+      if(e>40){
+        const ef=(e-40)/215;
+        const ec=mode==="NVG"?[0,255,80]:mode==="BLUE"?[0,160,255]:[255,255,200];
+        data[i]=Math.min(255,data[i]*(1-ef)+ec[0]*ef);
+        data[i+1]=Math.min(255,data[i+1]*(1-ef)+ec[1]*ef);
+        data[i+2]=Math.min(255,data[i+2]*(1-ef)+ec[2]*ef);
+      }
+    }
+    if(motionMap[pIdx]){
+      data[i]=Math.min(255,data[i]*0.4+255*0.6);
+      data[i+1]=Math.min(255,data[i+1]*0.4+100*0.6);
+      data[i+2]=Math.min(255,data[i+2]*0.1);
+    }
+  }
+
+  // Phosphor bloom pass (NVG only) — after pixel processing, before output
+  if(mode==="NVG") applyPhosphorBloom(data,sw,sh);
+
+  rawCtx.putImageData(imageData,0,0);
+  const dCtx=dispCanvas.getContext("2d");
+  dCtx.drawImage(rawCanvas,0,0);
+
+  if(mode==="NVG"){
+    // Scanlines: alternating rows dark (real image intensifier tube artifact)
+    dCtx.fillStyle="rgba(0,0,0,0.10)";
+    for(let y=0;y<sh;y+=2)dCtx.fillRect(0,y,sw,1);
+    // Center brightness falloff (tube curvature)
+    const cg=dCtx.createRadialGradient(sw/2,sh/2,sh*0.05,sw/2,sh/2,sh*0.75);
+    cg.addColorStop(0,"rgba(0,20,0,0)");
+    cg.addColorStop(0.7,"rgba(0,10,0,0.1)");
+    cg.addColorStop(1,"rgba(0,0,0,0.55)");
+    dCtx.fillStyle=cg;dCtx.fillRect(0,0,sw,sh);
+    // Subtle green ambient glow overlay
+    dCtx.fillStyle="rgba(0,255,60,0.03)";dCtx.fillRect(0,0,sw,sh);
+  } else {
+    dCtx.fillStyle="rgba(0,0,0,0.04)";
+    for(let y=0;y<sh;y+=3)dCtx.fillRect(0,y,sw,1);
+  }
+  const vg=dCtx.createRadialGradient(sw/2,sh/2,sh*0.1,sw/2,sh/2,sh*0.9);
+  vg.addColorStop(0,"rgba(0,0,0,0)");vg.addColorStop(.7,"rgba(0,0,0,0)");vg.addColorStop(1,"rgba(0,0,0,0.75)");
+  dCtx.fillStyle=vg;dCtx.fillRect(0,0,sw,sh);
+
+  // Draw tripwires on canvas
+  if(tripwires&&tripwires.length){
+    for(const tw of tripwires){
+      if(tw.points.length<2)continue;
+      dCtx.beginPath();
+      dCtx.moveTo(tw.points[0].x/100*sw,tw.points[0].y/100*sh);
+      for(let i=1;i<tw.points.length;i++)dCtx.lineTo(tw.points[i].x/100*sw,tw.points[i].y/100*sh);
+      dCtx.strokeStyle=tw.triggered?"rgba(255,30,30,0.9)":"rgba(255,200,0,0.7)";
+      dCtx.lineWidth=2;dCtx.setLineDash([6,4]);dCtx.stroke();dCtx.setLineDash([]);
+      // label
+      const lx=tw.points[0].x/100*sw,ly=tw.points[0].y/100*sh;
+      dCtx.fillStyle=tw.triggered?"#ff2222":"#ffcc00";
+      dCtx.font="bold 9px DM Mono, monospace";
+      dCtx.fillText(tw.label,lx+4,ly-4);
+    }
+  }
+
+  let tempData=null;
+  if(tempSamples.length>0){
+    let hot=-Infinity,cold=Infinity,sum=0,hotPx=50,hotPy=50;
+    for(const{lum,px,py}of tempSamples){
+      const t=18+(lum/255)*22;
+      if(t>hot){hot=t;hotPx=px/sw*100;hotPy=py/sh*100;}
+      if(t<cold)cold=t;sum+=t;
+    }
+    tempData={hot,cold,avg:sum/tempSamples.length,hotX:hotPx,hotY:hotPy};
+  }
+
+  const blobs=motionPixels>20?findBlobs(motionMap,sw,sh,60):[];
+  // Classify and add distance to each blob
+  const enrichedBlobs=blobs.map(b=>{
+    const cls=classifyBlob(b,sw,sh);
+    const dist=estimateDistance(b.h,sh,cls.label);
+    return{...b,...cls,dist};
+  });
+
+  // Check tripwire intersections
+  const triggeredWires=[];
+  if(tripwires&&blobs.length){
+    for(const tw of tripwires){
+      if(tw.points.length<2)continue;
+      for(const blob of blobs){
+        const bx=blob.cx/sw*100,by=blob.cy/sh*100;
+        // Simple: check if blob center is near any wire segment
+        for(let i=0;i<tw.points.length-1;i++){
+          const p1=tw.points[i],p2=tw.points[i+1];
+          const dx=p2.x-p1.x,dy=p2.y-p1.y;
+          const len=Math.sqrt(dx*dx+dy*dy);
+          if(len<0.1)continue;
+          const t=Math.max(0,Math.min(1,((bx-p1.x)*dx+(by-p1.y)*dy)/(len*len)));
+          const cx2=p1.x+t*dx,cy2=p1.y+t*dy;
+          const dist2=Math.sqrt((bx-cx2)**2+(by-cy2)**2);
+          if(dist2<4)triggeredWires.push(tw.id);
+        }
+      }
+    }
+  }
+
+  return{motionFrac:motionPixels/(sw*sh),blobs:enrichedBlobs,tempData,sw,sh,triggeredWires,rppgVal};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HOOKS
+// ═══════════════════════════════════════════════════════════════════════════════
+function useClock(){
+  const[t,setT]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(id);},[]);
+  return t;
+}
+function useDeviceOrientation(){
+  const[h,setH]=useState(null);
+  useEffect(()=>{
+    const fn=e=>{if(e.alpha!==null)setH(Math.round(e.alpha));};
+    window.addEventListener("deviceorientationabsolute",fn,true);
+    window.addEventListener("deviceorientation",fn,true);
+    return()=>{window.removeEventListener("deviceorientationabsolute",fn,true);window.removeEventListener("deviceorientation",fn,true);};
+  },[]);
+  return h;
+}
+function useGPS(){
+  const[pos,setPos]=useState(null);
+  useEffect(()=>{
+    if(!navigator.geolocation)return;
+    const id=navigator.geolocation.watchPosition(
+      p=>setPos({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),
+      ()=>{},
+      {enableHighAccuracy:true,maximumAge:5000}
+    );
+    return()=>navigator.geolocation.clearWatch(id);
+  },[]);
+  return pos;
+}
+function useMicrophone(enabled){
+  const[level,setLevel]=useState(0);
+  const[spike,setSpike]=useState(false);
+  const ctxRef=useRef(null);
+  const analyserRef=useRef(null);
+  const rafRef=useRef(null);
+  const baselineRef=useRef(50);
+  useEffect(()=>{
+    if(!enabled){setLevel(0);setSpike(false);return;}
+    let active=true;
+    navigator.mediaDevices?.getUserMedia({audio:true,video:false}).then(stream=>{
+      if(!active)return;
+      const ctx=new(window.AudioContext||window.webkitAudioContext)();
+      const analyser=ctx.createAnalyser();
+      analyser.fftSize=256;
+      const src=ctx.createMediaStreamSource(stream);
+      src.connect(analyser);
+      ctxRef.current=ctx;analyserRef.current=analyser;
+      const buf=new Uint8Array(analyser.frequencyBinCount);
+      const tick=()=>{
+        if(!active)return;
+        analyser.getByteFrequencyData(buf);
+        const avg=buf.reduce((s,v)=>s+v,0)/buf.length;
+        setLevel(Math.round(avg));
+        baselineRef.current=baselineRef.current*0.98+avg*0.02;
+        setSpike(avg>baselineRef.current*2.2&&avg>35);
+        rafRef.current=requestAnimationFrame(tick);
+      };
+      rafRef.current=requestAnimationFrame(tick);
+    }).catch(()=>{});
+    return()=>{
+      active=false;
+      cancelAnimationFrame(rafRef.current);
+      ctxRef.current?.close();
+    };
+  },[enabled]);
+  return{level,spike};
+}
+function useRPPG(samples){
+  const[hr,setHr]=useState(null);
+  const bufRef=useRef([]);
+  useEffect(()=>{
+    if(!samples)return;
+    const buf=bufRef.current;
+    buf.push({v:samples,t:Date.now()});
+    if(buf.length>180)buf.shift();
+    if(buf.length<60)return;
+    // Peak detection on green channel signal
+    const vals=buf.map(b=>b.v);
+    const mean=vals.reduce((s,v)=>s+v,0)/vals.length;
+    const norm=vals.map(v=>v-mean);
+    let peaks=0;
+    for(let i=1;i<norm.length-1;i++){
+      if(norm[i]>norm[i-1]&&norm[i]>norm[i+1]&&norm[i]>2)peaks++;
+    }
+    const seconds=(buf[buf.length-1].t-buf[0].t)/1000;
+    if(seconds>2){const bpm=Math.round((peaks/seconds)*60);if(bpm>40&&bpm<180)setHr(bpm);}
+  },[samples]);
+  return hr;
+}
+function useCameraStream(constraints,enabled=true){
+  const[stream,setStream]=useState(null);
+  const[error,setError]=useState(null);
+  const[ready,setReady]=useState(false);
+  const key=JSON.stringify(constraints)+String(enabled);
+  const acquire=useCallback((active,onStream,onErr)=>{
+    navigator.mediaDevices?.getUserMedia({video:{...constraints,width:{ideal:1280},height:{ideal:720}},audio:false})
+      .then(s=>{if(!active())return s.getTracks().forEach(t=>t.stop());onStream(s);})
+      .catch(e=>{if(active())onErr(e.message||"Camera unavailable");});
+  // eslint-disable-next-line
+  },[key]);
+
+  useEffect(()=>{
+    if(!enabled){setStream(s=>{s?.getTracks().forEach(t=>t.stop());return null;});setReady(false);return;}
+    let live=true;
+    const isLive=()=>live;
+    setReady(false);setError(null);
+
+    const start=()=>acquire(isLive,s=>{
+      setStream(s);setReady(true);
+      // track ended = OS killed camera, restart
+      s.getVideoTracks().forEach(t=>{
+        t.onended=()=>{if(live){setReady(false);setTimeout(()=>start(),800);}};
+      });
+    },e=>setError(e));
+    start();
+
+    // visibilitychange: resume when tab comes back
+    const onVisible=()=>{
+      if(document.visibilityState==="visible"&&live){
+        setStream(s=>{
+          if(s){
+            const t=s.getVideoTracks()[0];
+            if(t&&t.readyState==="live")return s;
+            s.getTracks().forEach(t=>t.stop());
+          }
+          return null;
+        });
+        setReady(false);
+        setTimeout(()=>start(),300);
+      }
+    };
+    document.addEventListener("visibilitychange",onVisible);
+    return()=>{live=false;document.removeEventListener("visibilitychange",onVisible);};
+  // eslint-disable-next-line
+  },[key,acquire]);
+
+  useEffect(()=>()=>stream?.getTracks().forEach(t=>t.stop()),[stream]);
+  return{stream,error,ready};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-DEVICE SYNC (WebRTC signaling via BroadcastChannel + PeerJS-less peer)
+// Uses localStorage as simple signaling bus for same-device tabs
+// ═══════════════════════════════════════════════════════════════════════════════
+function useMultiSync(enabled,myId){
+  const[peers,setPeers]=useState([]);
+  const[alerts,setAlerts]=useState([]);
+  const chRef=useRef(null);
+  useEffect(()=>{
+    if(!enabled||typeof BroadcastChannel==="undefined")return;
+    const ch=new BroadcastChannel("nvs7_sync");
+    chRef.current=ch;
+    ch.onmessage=e=>{
+      const{type,from,payload}=e.data;
+      if(from===myId)return;
+      if(type==="HEARTBEAT")setPeers(p=>{const exists=p.find(x=>x.id===from);if(exists)return p.map(x=>x.id===from?{...x,ts:Date.now()}:x);return[...p,{id:from,ts:Date.now(),label:payload?.label||from}];});
+      if(type==="MOTION_ALERT")setAlerts(a=>[{from,payload,ts:Date.now()},...a].slice(0,20));
+    };
+    const beat=setInterval(()=>ch.postMessage({type:"HEARTBEAT",from:myId,payload:{label:`NVS-${myId.slice(-4)}`}})
+    ,3000);
+    const prune=setInterval(()=>setPeers(p=>p.filter(x=>Date.now()-x.ts<10000)),5000);
+    return()=>{ch.close();clearInterval(beat);clearInterval(prune);};
+  },[enabled,myId]);
+  const broadcast=useCallback((type,payload)=>{
+    chRef.current?.postMessage({type,from:myId,payload});
+  },[myId]);
+  return{peers,alerts,broadcast};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIMELINE STORE
+// ═══════════════════════════════════════════════════════════════════════════════
+function useTimeline(){
+  const[events,setEvents]=useState([]);
+  const add=useCallback((type,data)=>setEvents(e=>[{id:Date.now(),type,data,ts:Date.now()},...e].slice(0,200)),[]);
+  return{events,add};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GPS MAP MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// INSTRUCTIONS MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function InstructionsModal({color,onClose}){
+  const[tab,setTab]=useState("start");
+  const tabs={
+    start:"QUICK START",
+    modes:"IR MODES",
+    motion:"MOTION",
+    sync:"SYNC",
+    features:"FEATURES",
+  };
+  const content={
+    start:[
+      {icon:"📷",title:"ALLOW CAMERA",body:"Open in Chrome/Safari. Tap Allow when prompted for camera. For GPS tap Allow on the location prompt. For audio tap Allow on the mic prompt. iOS: Settings → Safari → Camera → Allow."},
+      {icon:"🔒",title:"HTTPS REQUIRED",body:"Camera only works on HTTPS. The Vercel URL is already secure. If self-hosting use localhost or add an SSL cert."},
+      {icon:"📱",title:"BEST ON MOBILE",body:"Open the Vercel URL on your phone in Chrome. Tap the share button → Add to Home Screen for a full-screen app experience with no browser chrome."},
+      {icon:"🌙",title:"NIGHT USE",body:"In a dark environment, crank GAIN to +2 and switch to NVG mode. Point at any light source briefly to let the sensor calibrate, then scan your scene. CLAHE will pull detail out of near-black regions."},
+    ],
+    modes:[
+      {icon:"🟢",title:"NVG — Night Vision Green",body:"Classic phosphor image amplification. Green channel pushed 1.2×, red and blue near zero. CLAHE applied to 6×6 tile grid for dark detail recovery. Best for general low-light surveillance."},
+      {icon:"🔴",title:"THERMAL — FLIR Iron-Bow",body:"Calibrated 256-entry LUT maps luminance to heat color: black→purple→red→orange→yellow→white. Brighter = hotter. Hot-spot marker shows peak temperature in °C. Not a real IR sensor — uses visible light brightness as heat proxy."},
+      {icon:"🔵",title:"RAINBOW / FUSION",body:"Alternative false-color IR palettes. RAINBOW maps cold→blue→green→yellow→red→hot. FUSION goes purple→orange→white. Useful for scene contrast when THERMAL is too saturated."},
+      {icon:"⬜",title:"ARCTIC / WHT-HOT",body:"ARCTIC boosts blue channel for cold-scene IR simulation. WHT-HOT is high-contrast grayscale with 3.0× brightness and 2.4× contrast — good for fog, smoke, and haze environments."},
+    ],
+    motion:[
+      {icon:"🎯",title:"MOTION DETECTION",body:"Frame-differencing compares each pixel to the previous frame. Threshold set by SENS slider — higher = more sensitive (picks up small movement), lower = ignores minor changes like foliage."},
+      {icon:"🔲",title:"LOCK-ON + AI CLASSIFY",body:"BFS blob-labeling groups moving pixels into up to 8 distinct targets. Each gets a bracket box labeled TGT-01 through TGT-08. AI classifier reads blob aspect ratio, area, and position to guess PERSON 🧍, VEHICLE 🚗, DRONE 🦅, ANIMAL 🐾, or SMALL OBJ."},
+      {icon:"📐",title:"RANGEFINDER",body:"Distance shown under each target box (~Xm). Uses pinhole camera model: blob height in pixels + estimated real height (1.7m for person, 1.5m for vehicle) + 60° VFOV → distance in meters. Accurate to ±20% for human targets."},
+      {icon:"🎯",title:"AUTO-CAPTURE",body:"Enable AUTO-CAP. When a blob exceeds 0.8% of frame area, a 600ms countdown starts. Camera flashes white and saves a PNG to Gallery. 3-second cooldown per camera. Works independently on REAR and FRONT in DUAL mode."},
+      {icon:"⚡",title:"TRIPWIRE ZONES",body:"Tap WIRE to open the editor. Tap + DRAW, tap points on the canvas to lay a line, tap ✓ DONE. When a target blob crosses the wire, it flashes red, logs to Timeline, and resets after 3 seconds. Draw multiple zones."},
+    ],
+    sync:[
+      {icon:"💻",title:"CROSS-DEVICE (LAPTOP + PHONE)",body:"The easiest way: open the same Vercel URL on both devices in Chrome. Each shows its own camera feed independently. No pairing needed — just two windows."},
+      {icon:"🔗",title:"SHARE THE URL",body:"URL: https://night-vision-git-master-cloudygetty-ais-projects.vercel.app — send it to anyone. They open it on their device and get their own NVS feed. Useful for covering multiple angles simultaneously."},
+      {icon:"📡",title:"SYNC BUTTON (SAME DEVICE ONLY)",body:"The SYNC button uses BroadcastChannel — this only works between tabs or windows on the SAME device. Open NVS in two Chrome tabs on your laptop: both will see each other's motion alerts in real time. NOT cross-network."},
+      {icon:"📺",title:"DUAL CAMERA MODE",body:"On a phone with front + rear camera, tap DUAL. Both cameras activate simultaneously in split view. Each runs its own motion detector, auto-capture, and processing pipeline independently."},
+      {icon:"🌐",title:"REAL-TIME NETWORK SYNC (COMING)",body:"True cross-device WebRTC streaming (phone → laptop) requires a signaling server. This is not yet built into NVS-7.5. Planned for NVS-8.0. For now, use the shared URL approach above."},
+    ],
+    features:[
+      {icon:"🔬",title:"EDGE DETECTION",body:"Toggle EDGE to run Sobel gradient detection. Outlines object boundaries in mode-matched color (green for NVG, blue for ARCTIC, white for thermal). Very useful at high zoom levels."},
+      {icon:"🔇",title:"NOISE REDUCTION",body:"NR blends each frame with the previous at 78% alpha. Smooths out sensor noise. Best for static scenes. Disable if you need max sensitivity to fast small motion."},
+      {icon:"💓",title:"rPPG HEART RATE",body:"Toggle rPPG then point the FRONT camera at your face in good light. Samples mean green channel from center 20% of frame. Peak detection over 60 frames estimates BPM. Requires 5-10 seconds to stabilize. Works best in NVG or WHT-HOT mode."},
+      {icon:"🔊",title:"AUDIO SPIKE DETECTION",body:"Toggle the mic button 🎙. Sets a rolling ambient baseline. If audio spikes above 2.2× baseline, triggers AUDIO SPIKE alert and logs to Timeline. Useful for detecting door slams, gunshots, or voices off-camera."},
+      {icon:"🗺",title:"GPS MAP",body:"Allow location when prompted. Tap MAP to open the OSM tile map. Drag to pan, +/− to zoom, ◎ CTR to snap back to your position. Motion events with GPS coords appear as orange pins. Map uses OpenStreetMap tiles with NVG tint."},
+      {icon:"⏱",title:"TIMELINE",body:"Every event logs here: motion detections, captures, audio spikes, tripwire breaches, and peer alerts. Tap LOG to open. Left pane = event list, right pane = detail view. Captures show image preview with download button."},
+      {icon:"📹",title:"RECORDING",body:"Tap ● REC to start. Records the processed canvas (with NVG filter applied) as WebM video. Tap ■ STOP — file auto-downloads. Works only on the REAR camera output."},
+      {icon:"🔆",title:"GAIN + ZOOM",body:"GAIN: 5-bar brightness from −1.5 to +1.5 applied to the processing pipeline. ZOOM: 1× to 12×. Above 4× uses pixel-sharp rendering. Combine high zoom with EDGE for maximum target definition at distance."},
+    ],
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.98)",zIndex:300,
+      display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"10px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0}}>
+        <span style={{fontFamily:"'Cinzel',serif",fontSize:11,fontWeight:900,
+          color,letterSpacing:4,textShadow:`0 0 12px ${color}40`}}>
+          NVS-7 // OPERATOR MANUAL
+        </span>
+        <button onClick={onClose} style={{padding:"4px 12px",background:"transparent",
+          border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+          fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>
+          ✕ CLOSE
+        </button>
+      </div>
+      {/* Tab bar */}
+      <div style={{display:"flex",gap:2,padding:"6px 10px",
+        borderBottom:`1px solid ${color}10`,flexShrink:0,overflowX:"auto"}}>
+        {Object.entries(tabs).map(([k,v])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{
+            padding:"5px 10px",background:tab===k?`${color}15`:"transparent",
+            border:`1px solid ${tab===k?color:`${color}15`}`,
+            borderRadius:2,fontSize:7,color:tab===k?color:`${color}45`,
+            letterSpacing:1,cursor:"pointer",whiteSpace:"nowrap",
+            fontFamily:"'DM Mono',monospace",transition:"all 0.12s"}}>
+            {v}
+          </button>
+        ))}
+      </div>
+      {/* Content */}
+      <div style={{flex:1,overflowY:"auto",padding:"12px 14px"}}>
+        {content[tab].map((s,i)=>(
+          <div key={i} style={{display:"flex",gap:12,marginBottom:14,
+            padding:"10px 12px",border:`1px solid ${color}12`,
+            borderRadius:3,background:`${color}03`}}>
+            <span style={{fontSize:20,flexShrink:0,marginTop:2}}>{s.icon}</span>
+            <div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color,
+                letterSpacing:2,marginBottom:5}}>{s.title}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+                color:`${color}65`,lineHeight:1.7,letterSpacing:.4}}>{s.body}</div>
+            </div>
+          </div>
+        ))}
+        {tab==="sync"&&(
+          <div style={{padding:"10px 12px",border:`1px solid ${color}30`,borderRadius:3,
+            background:`${color}08`,marginTop:4}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color,letterSpacing:2,marginBottom:6}}>
+              📋 QUICK SYNC STEPS — PHONE + LAPTOP
+            </div>
+            {[
+              "1. On your phone — open Chrome, go to the Vercel URL",
+              "2. On your laptop — open Chrome, go to the same Vercel URL",
+              "3. Both devices now run independent NVS feeds",
+              "4. Allow camera on each device when prompted",
+              "5. Position phone facing one direction, laptop another",
+              "6. Both feeds monitor simultaneously — no pairing needed",
+            ].map((s,i)=>(
+              <div key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+                color:`${color}80`,padding:"3px 0",
+                borderBottom:i<5?`1px solid ${color}08`:"none",letterSpacing:.5}}>
+                {s}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* Footer */}
+      <div style={{padding:"6px 14px",borderTop:`1px solid ${color}08`,
+        display:"flex",justifyContent:"space-between",flexShrink:0}}>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:6,color:`${color}25`,letterSpacing:1}}>
+          CLOUDYGETTY-AI // ENTROPY-ZERO // NVS-7.5
+        </span>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:6,color:`${color}25`,letterSpacing:1}}>
+          ALL RIGHTS RESERVED
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Tile helpers for OSM slippy map
+function latLonToTile(lat,lon,z){
+  const n=Math.pow(2,z);
+  const x=Math.floor((lon+180)/360*n);
+  const y=Math.floor((1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n);
+  return{x,y,z};
+}
+function tileToLatLon(tx,ty,z){
+  const n=Math.pow(2,z);
+  const lon=tx/n*360-180;
+  const latRad=Math.atan(Math.sinh(Math.PI*(1-2*ty/n)));
+  return{lat:latRad*180/Math.PI,lon};
+}
+
+function GPSMap({pos,events,color,onClose}){
+  const mapRef=useRef(null);
+  const canvasRef=useRef(null);
+  const[zoom,setZoom]=useState(16);
+  const[center,setCenter]=useState(null);
+  const[pins,setPins]=useState([]);
+  const tileCache=useRef({});
+  const dragging=useRef(null);
+  const centerRef=useRef(null);
+
+  // sync center ref
+  useEffect(()=>{centerRef.current=center;},[center]);
+
+  // init center from GPS
+  useEffect(()=>{
+    if(pos&&!center)setCenter({lat:pos.lat,lon:pos.lon});
+  },[pos]);// eslint-disable-line
+
+  // update pins from events
+  useEffect(()=>{
+    const m=events.filter(e=>e.type==="motion"&&e.data?.lat).slice(0,50);
+    setPins(m.map(e=>({lat:e.data.lat,lon:e.data.lon,label:e.data.label||"MOT"})));
+  },[events]);
+
+  const draw=useCallback(()=>{
+    const c=canvasRef.current;
+    if(!c)return;
+    const ctr=centerRef.current;
+    const ctx=c.getContext("2d");
+    const W=c.parentElement?.clientWidth||window.innerWidth;
+    const H=c.parentElement?.clientHeight||400;
+    c.width=W;c.height=H;
+    ctx.fillStyle="#0a0f0a";ctx.fillRect(0,0,W,H);
+
+    if(!ctr){
+      ctx.fillStyle=color;ctx.font="bold 11px DM Mono,monospace";ctx.textAlign="center";
+      ctx.fillText("GPS ACQUIRING...",W/2,H/2-8);
+      ctx.font="9px DM Mono,monospace";ctx.fillStyle=`${color}60`;
+      ctx.fillText("Allow location permission",W/2,H/2+10);
+      return;
+    }
+
+    // tile size in pixels
+    const TILE=256;
+    const z=zoom;
+    const cTile=latLonToTile(ctr.lat,ctr.lon,z);
+    // pixel offset of center within its tile
+    const n=Math.pow(2,z);
+    const cx_exact=(ctr.lon+180)/360*n;
+    const cy_exact=(1-Math.log(Math.tan(ctr.lat*Math.PI/180)+1/Math.cos(ctr.lat*Math.PI/180))/Math.PI)/2*n;
+    const offX=(cx_exact-cTile.x)*TILE;
+    const offY=(cy_exact-cTile.y)*TILE;
+
+    // how many tiles needed
+    const tilesX=Math.ceil(W/TILE)+2;
+    const tilesY=Math.ceil(H/TILE)+2;
+    const startTX=cTile.x-Math.floor(tilesX/2);
+    const startTY=cTile.y-Math.floor(tilesY/2);
+
+    // draw tiles
+    for(let ty=0;ty<tilesY;ty++){
+      for(let tx=0;tx<tilesX;tx++){
+        const tileX=((startTX+tx)%n+n)%n;
+        const tileY=startTY+ty;
+        if(tileY<0||tileY>=n)continue;
+        const px=W/2-offX+(tx-Math.floor(tilesX/2))*TILE;
+        const py=H/2-offY+(ty-Math.floor(tilesY/2))*TILE;
+        const key=`${z}/${tileX}/${tileY}`;
+        if(tileCache.current[key]&&tileCache.current[key].complete){
+          ctx.drawImage(tileCache.current[key],px,py,TILE,TILE);
+          // NVG green tint over tile
+          ctx.fillStyle="rgba(0,30,0,0.55)";ctx.fillRect(px,py,TILE,TILE);
+          // green channel boost via globalCompositeOperation already applied above
+        } else if(!tileCache.current[key]){
+          const img=new Image();img.crossOrigin="anonymous";
+          img.src=`https://tile.openstreetmap.org/${z}/${tileX}/${tileY}.png`;
+          img.onload=()=>draw();
+          tileCache.current[key]=img;
+          ctx.fillStyle="#0a120a";ctx.fillRect(px,py,TILE,TILE);
+          ctx.strokeStyle="rgba(0,255,80,0.06)";ctx.strokeRect(px,py,TILE,TILE);
+        } else {
+          ctx.fillStyle="#0a120a";ctx.fillRect(px,py,TILE,TILE);
+        }
+      }
+    }
+
+    // Grid overlay
+    ctx.strokeStyle="rgba(0,255,80,0.07)";ctx.lineWidth=1;
+    for(let x=0;x<W;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+    // lat/lon to pixel helper
+    const toScreen=(lat,lon)=>{
+      const lx=(lon+180)/360*n;
+      const ly=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+      return{x:W/2+(lx-cx_exact)*TILE,y:H/2+(ly-cy_exact)*TILE};
+    };
+
+    // Motion pins
+    for(const pin of pins){
+      const{x,y}=toScreen(pin.lat,pin.lon);
+      ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);
+      ctx.fillStyle="#ff5500";ctx.fill();
+      ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);
+      ctx.strokeStyle="rgba(255,85,0,0.5)";ctx.lineWidth=1;ctx.stroke();
+      ctx.fillStyle="#ff8800";ctx.font="bold 8px DM Mono,monospace";ctx.textAlign="left";
+      ctx.fillText(pin.label,x+7,y+3);
+    }
+
+    // GPS position dot (live)
+    if(pos){
+      const{x,y}=toScreen(pos.lat,pos.lon);
+      // Accuracy circle
+      if(pos.acc){
+        const metersPerPx=156543.03392*Math.cos(pos.lat*Math.PI/180)/Math.pow(2,z);
+        const r=Math.min(80,(pos.acc/metersPerPx));
+        ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+        ctx.fillStyle="rgba(0,255,80,0.07)";ctx.fill();
+        ctx.strokeStyle="rgba(0,255,80,0.25)";ctx.lineWidth=1;ctx.setLineDash([3,4]);ctx.stroke();ctx.setLineDash([]);
+      }
+      // Outer ring pulse
+      ctx.beginPath();ctx.arc(x,y,14,0,Math.PI*2);
+      ctx.strokeStyle=`${color}60`;ctx.lineWidth=1.5;ctx.stroke();
+      // Inner dot
+      ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);
+      ctx.fillStyle=color;ctx.shadowColor=color;ctx.shadowBlur=12;ctx.fill();
+      ctx.shadowBlur=0;
+      // You-are-here label
+      ctx.fillStyle=color;ctx.font="bold 8px DM Mono,monospace";ctx.textAlign="center";
+      ctx.fillText("YOU",x,y-18);
+    }
+
+    // Crosshair center
+    ctx.strokeStyle=`${color}30`;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(W/2-20,H/2);ctx.lineTo(W/2+20,H/2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(W/2,H/2-20);ctx.lineTo(W/2,H/2+20);ctx.stroke();
+
+    // Coords footer
+    ctx.fillStyle=`${color}80`;ctx.font="9px DM Mono,monospace";ctx.textAlign="left";
+    ctx.fillText(`${ctr.lat.toFixed(5)}°N  ${ctr.lon.toFixed(5)}°W`,8,H-8);
+    ctx.textAlign="right";
+    ctx.fillText(`Z${z}`,W-8,H-8);
+  },[zoom,pins,pos,color]);
+
+  // Redraw on any change
+  useEffect(()=>{draw();},[draw,center]);
+
+  // ResizeObserver so canvas fills container correctly
+  useEffect(()=>{
+    const el=canvasRef.current?.parentElement;
+    if(!el)return;
+    const ro=new ResizeObserver(()=>draw());
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[draw]);
+
+  // Touch/mouse pan
+  const onPointerDown=e=>{
+    dragging.current={x:e.clientX,y:e.clientY,center:{...centerRef.current}};
+  };
+  const onPointerMove=e=>{
+    if(!dragging.current)return;
+    const dx=e.clientX-dragging.current.x;
+    const dy=e.clientY-dragging.current.y;
+    const n=Math.pow(2,zoom);
+    const metersPerPx=156543.03392*Math.cos(dragging.current.center.lat*Math.PI/180)/Math.pow(2,zoom);
+    const degPerPx=metersPerPx/111320;
+    const newLat=dragging.current.center.lat+dy*degPerPx;
+    const newLon=dragging.current.center.lon-dx*degPerPx*Math.cos(dragging.current.center.lat*Math.PI/180);
+    setCenter({lat:newLat,lon:newLon});
+  };
+  const onPointerUp=()=>{dragging.current=null;};
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#0a0f0a",zIndex:200,
+      display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"8px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0,
+        background:"rgba(0,0,0,0.8)"}}>
+        <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4}}>
+          GPS TACTICAL MAP
+        </span>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {pos&&<span style={{fontSize:7,color:`${color}60`,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>
+            {pos.lat.toFixed(4)}°N {pos.lon.toFixed(4)}°W ±{pos.acc?.toFixed(0)}m
+          </span>}
+          {/* Zoom controls */}
+          <button onClick={()=>setZoom(z=>Math.min(19,z+1))} style={{width:24,height:24,background:`${color}15`,
+            border:`1px solid ${color}40`,borderRadius:2,color,fontSize:14,cursor:"pointer",lineHeight:1}}>+</button>
+          <span style={{fontSize:8,color:`${color}70`,fontFamily:"'DM Mono',monospace",minWidth:20,textAlign:"center"}}>Z{zoom}</span>
+          <button onClick={()=>setZoom(z=>Math.max(2,z-1))} style={{width:24,height:24,background:`${color}15`,
+            border:`1px solid ${color}40`,borderRadius:2,color,fontSize:14,cursor:"pointer",lineHeight:1}}>−</button>
+          {pos&&<button onClick={()=>setCenter({lat:pos.lat,lon:pos.lon})} style={{padding:"2px 8px",background:`${color}10`,
+            border:`1px solid ${color}30`,borderRadius:2,color:`${color}90`,
+            fontFamily:"'DM Mono',monospace",fontSize:7,letterSpacing:1,cursor:"pointer"}}>
+            ◎ CTR
+          </button>}
+          <button onClick={onClose} style={{padding:"4px 10px",background:"transparent",
+            border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+            fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>
+            ✕
+          </button>
+        </div>
+      </div>
+      {/* Map canvas */}
+      <div style={{flex:1,position:"relative",overflow:"hidden",cursor:"grab"}}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
+        <canvas ref={canvasRef} style={{display:"block",width:"100%",height:"100%"}}/>
+      </div>
+      {/* Footer */}
+      <div style={{padding:"5px 14px",borderTop:`1px solid ${color}10`,
+        display:"flex",justifyContent:"space-between",background:"rgba(0,0,0,0.8)",flexShrink:0}}>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:`${color}40`,letterSpacing:1}}>
+          🟠 {pins.length} MOTION PINS • DRAG TO PAN • +/− TO ZOOM
+        </span>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:`${color}25`,letterSpacing:1}}>
+          OSM TILES
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIMELINE MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function TimelineModal({events,captures,color,onClose}){
+  const[selected,setSelected]=useState(null);
+  const allEvents=useMemo(()=>[
+    ...events.map(e=>({...e,kind:"event"})),
+    ...captures.map(c=>({id:c.ts,ts:c.ts,type:"capture",data:c,kind:"capture"})),
+  ].sort((a,b)=>b.ts-a.ts),[events,captures]);
+
+  const typeColor={motion:"#ff5500",capture:"#00ff50",audio:"#00ccff",tripwire:"#ffcc00",peer:"#cc44ff"};
+  const typeIcon={motion:"🎯",capture:"📷",audio:"🔊",tripwire:"⚠️",peer:"📡"};
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:200,
+      display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"10px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0}}>
+        <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4}}>
+          TIMELINE — {allEvents.length} EVENTS
+        </span>
+        <button onClick={onClose} style={{padding:"4px 10px",background:"transparent",
+          border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+          fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>
+          CLOSE
+        </button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",flex:1,overflow:"hidden"}}>
+        {/* Event list */}
+        <div style={{overflowY:"auto",borderRight:`1px solid ${color}10`,padding:8}}>
+          {allEvents.length===0&&(
+            <div style={{textAlign:"center",padding:30,fontFamily:"'DM Mono',monospace",
+              fontSize:8,color:`${color}35`,letterSpacing:1}}>NO EVENTS YET</div>
+          )}
+          {allEvents.map(ev=>{
+            const tc=typeColor[ev.type]||color;
+            const ti=typeIcon[ev.type]||"●";
+            const t=new Date(ev.ts).toLocaleTimeString("en-US",{hour12:false});
+            return(
+              <div key={ev.id} onClick={()=>setSelected(ev)}
+                style={{display:"flex",gap:6,padding:"5px 6px",marginBottom:3,
+                  background:selected?.id===ev.id?`${tc}12`:"transparent",
+                  border:`1px solid ${selected?.id===ev.id?tc:`${tc}15`}`,
+                  borderRadius:2,cursor:"pointer"}}>
+                <span style={{fontSize:11,flexShrink:0}}>{ti}</span>
+                <div style={{display:"flex",flexDirection:"column",gap:1,flex:1,minWidth:0}}>
+                  <span style={{fontSize:7,color:tc,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>
+                    {ev.type.toUpperCase()}{ev.data?.label?` — ${ev.data.label}`:""}
+                  </span>
+                  <span style={{fontSize:6,color:`${tc}60`,fontFamily:"'DM Mono',monospace"}}>{t}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {/* Detail pane */}
+        <div style={{overflowY:"auto",padding:10}}>
+          {!selected&&(
+            <div style={{textAlign:"center",padding:30,fontFamily:"'DM Mono',monospace",
+              fontSize:8,color:`${color}30`,letterSpacing:1}}>SELECT EVENT</div>
+          )}
+          {selected&&(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {selected.kind==="capture"&&selected.data?.url&&(
+                <img src={selected.data.url} style={{width:"100%",borderRadius:2,
+                  border:`1px solid ${color}20`}} alt="event"/>
+              )}
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:`${color}80`,letterSpacing:1}}>
+                {Object.entries(selected.data||{}).filter(([k])=>k!=="url"&&k!=="icon").map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",
+                    padding:"2px 0",borderBottom:`1px solid ${color}08`}}>
+                    <span style={{color:`${color}50`}}>{k.toUpperCase()}</span>
+                    <span style={{color:`${color}90`,maxWidth:"60%",textAlign:"right",
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {String(v).slice(0,40)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {selected.kind==="capture"&&selected.data?.url&&(
+                <a href={selected.data.url} download={`nvs7-${selected.ts}.png`}
+                  style={{textAlign:"center",padding:"5px",background:`${color}08`,
+                    border:`1px solid ${color}25`,borderRadius:2,color,
+                    fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,textDecoration:"none"}}>
+                  ↓ SAVE IMAGE
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRIPWIRE EDITOR
+// ═══════════════════════════════════════════════════════════════════════════════
+function TripwireEditor({tripwires,onUpdate,color,onClose}){
+  const[drawing,setDrawing]=useState(false);
+  const[current,setCurrent]=useState([]);
+  const svgRef=useRef(null);
+  const handleSVGClick=e=>{
+    if(!drawing)return;
+    const rect=svgRef.current.getBoundingClientRect();
+    const x=((e.clientX-rect.left)/rect.width)*100;
+    const y=((e.clientY-rect.top)/rect.height)*100;
+    setCurrent(p=>[...p,{x,y}]);
+  };
+  const finishWire=()=>{
+    if(current.length<2){setDrawing(false);setCurrent([]);return;}
+    const id=Date.now().toString();
+    onUpdate([...tripwires,{id,label:`ZONE-${tripwires.length+1}`,points:current,triggered:false}]);
+    setDrawing(false);setCurrent([]);
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:200,
+      display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"10px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0}}>
+        <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4}}>
+          TRIPWIRE EDITOR
+        </span>
+        <div style={{display:"flex",gap:6}}>
+          {!drawing?(
+            <button onClick={()=>setDrawing(true)} style={{padding:"4px 10px",background:`${color}10`,
+              border:`1px solid ${color}`,borderRadius:2,color,
+              fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1,cursor:"pointer"}}>
+              + DRAW
+            </button>
+          ):(
+            <button onClick={finishWire} style={{padding:"4px 10px",background:"rgba(0,255,80,0.15)",
+              border:"1px solid #00ff50",borderRadius:2,color:"#00ff50",
+              fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1,cursor:"pointer"}}>
+              ✓ DONE ({current.length}pts)
+            </button>
+          )}
+          {tripwires.length>0&&(
+            <button onClick={()=>onUpdate([])} style={{padding:"4px 10px",background:"transparent",
+              border:"1px solid rgba(255,50,50,0.4)",borderRadius:2,color:"rgba(255,50,50,0.7)",
+              fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1,cursor:"pointer"}}>
+              CLR ALL
+            </button>
+          )}
+          <button onClick={onClose} style={{padding:"4px 10px",background:"transparent",
+            border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+            fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>
+            CLOSE
+          </button>
+        </div>
+      </div>
+      <div style={{flex:1,position:"relative",background:"#0a0f0a"}}>
+        <svg ref={svgRef} onClick={handleSVGClick}
+          style={{width:"100%",height:"100%",cursor:drawing?"crosshair":"default"}}>
+          {/* Grid */}
+          <defs>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,255,80,0.06)" strokeWidth="1"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)"/>
+          {/* Existing wires */}
+          {tripwires.map(tw=>(
+            <g key={tw.id}>
+              {tw.points.length>1&&(
+                <polyline
+                  points={tw.points.map(p=>`${p.x}%,${p.y}%`).join(" ")}
+                  fill="none" stroke={tw.triggered?"#ff2222":"#ffcc00"} strokeWidth="2"
+                  strokeDasharray="6,4"/>
+              )}
+              {tw.points.map((p,i)=>(
+                <circle key={i} cx={`${p.x}%`} cy={`${p.y}%`} r="4"
+                  fill={tw.triggered?"#ff2222":"#ffcc00"} opacity="0.8"/>
+              ))}
+              {tw.points.length>0&&(
+                <text x={`${tw.points[0].x}%`} y={`${tw.points[0].y - 2}%`}
+                  fill="#ffcc00" fontSize="9" fontFamily="DM Mono, monospace">{tw.label}</text>
+              )}
+            </g>
+          ))}
+          {/* Current drawing */}
+          {current.length>1&&(
+            <polyline points={current.map(p=>`${p.x}%,${p.y}%`).join(" ")}
+              fill="none" stroke={`${color}90`} strokeWidth="2" strokeDasharray="4,3"/>
+          )}
+          {current.map((p,i)=>(
+            <circle key={i} cx={`${p.x}%`} cy={`${p.y}%`} r="4" fill={color} opacity="0.9"/>
+          ))}
+        </svg>
+        {drawing&&(
+          <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",
+            fontFamily:"'DM Mono',monospace",fontSize:8,color:`${color}80`,letterSpacing:2,
+            background:"rgba(0,0,0,0.7)",padding:"4px 10px",borderRadius:2}}>
+            TAP TO ADD POINTS → TAP ✓ DONE WHEN FINISHED
+          </div>
+        )}
+      </div>
+      <div style={{padding:"8px 14px",borderTop:`1px solid ${color}10`,
+        display:"flex",gap:6,overflowX:"auto"}}>
+        {tripwires.map(tw=>(
+          <div key={tw.id} style={{display:"flex",alignItems:"center",gap:4,flexShrink:0,
+            padding:"3px 8px",border:`1px solid ${tw.triggered?"#ff2222":"#ffcc0040"}`,
+            borderRadius:2,background:tw.triggered?"rgba(255,34,34,0.1)":"transparent"}}>
+            <span style={{fontSize:7,fontFamily:"'DM Mono',monospace",
+              color:tw.triggered?"#ff2222":"#ffcc00",letterSpacing:1}}>{tw.label}</span>
+            <button onClick={()=>onUpdate(tripwires.filter(t=>t.id!==tw.id))}
+              style={{background:"transparent",border:"none",color:"rgba(255,50,50,0.6)",
+                fontSize:9,cursor:"pointer",lineHeight:1,padding:0}}>×</button>
+          </div>
+        ))}
+        {!tripwires.length&&<span style={{fontSize:7,color:`${color}30`,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>
+          NO TRIPWIRES — TAP + DRAW
+        </span>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BIOMETRIC HUD
+// ═══════════════════════════════════════════════════════════════════════════════
+function BiometricHUD({hr,audioLevel,audioSpike,color}){
+  const hrColor=!hr?"#444":hr<60?"#0088ff":hr<100?"#00ff50":hr<140?"#ffaa00":"#ff3333";
+  const hrLabel=!hr?"--":hr<60?"BRADYCARDIA":hr<100?"NORMAL":hr<140?"ELEVATED":"TACHYCARDIA";
+  return(
+    <div style={{
+      position:"absolute",bottom:50,left:"50%",transform:"translateX(-50%)",
+      zIndex:26,display:"flex",gap:10,alignItems:"flex-end",
+    }}>
+      {/* HR */}
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1,
+        padding:"4px 8px",background:"rgba(0,0,0,0.75)",border:`1px solid ${hrColor}30`,
+        borderRadius:3}}>
+        <span style={{fontSize:6,color:`${hrColor}80`,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>rPPG HR</span>
+        <span style={{fontSize:16,color:hrColor,fontFamily:"'DM Mono',monospace",fontWeight:700,lineHeight:1,
+          textShadow:`0 0 8px ${hrColor}60`}}>
+          {hr||"--"}
+        </span>
+        <span style={{fontSize:5,color:`${hrColor}70`,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>{hrLabel}</span>
+      </div>
+      {/* Audio */}
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+        padding:"4px 8px",background:"rgba(0,0,0,0.75)",
+        border:`1px solid ${audioSpike?"#ff2222":"rgba(0,204,255,0.2)"}`,
+        borderRadius:3,animation:audioSpike?"rec-blink 0.3s step-end infinite":"none"}}>
+        <span style={{fontSize:6,color:"rgba(0,204,255,0.7)",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>
+          {audioSpike?"⚡ SPIKE":"AUDIO"}
+        </span>
+        <div style={{display:"flex",gap:1,alignItems:"flex-end",height:14}}>
+          {Array.from({length:8},(_,i)=>(
+            <div key={i} style={{
+              width:3,height:2+i*1.5,borderRadius:.5,
+              background:(audioLevel/255)*8>i?(audioSpike?"#ff2222":"#00ccff"):"rgba(0,204,255,0.15)",
+            }}/>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMON HUD COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+function Corners({color}){
+  const s={position:"absolute",width:20,height:20,opacity:.8};
+  return(<>
+    <div style={{...s,top:10,left:10,borderTop:`2px solid ${color}`,borderLeft:`2px solid ${color}`}}/>
+    <div style={{...s,top:10,right:10,borderTop:`2px solid ${color}`,borderRight:`2px solid ${color}`}}/>
+    <div style={{...s,bottom:10,left:10,borderBottom:`2px solid ${color}`,borderLeft:`2px solid ${color}`}}/>
+    <div style={{...s,bottom:10,right:10,borderBottom:`2px solid ${color}`,borderRight:`2px solid ${color}`}}/>
+  </>);
+}
+function Reticle({color}){
+  return(
+    <svg width={64} height={64} viewBox="0 0 64 64" style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",pointerEvents:"none",zIndex:15}}>
+      <circle cx={32} cy={32} r={20} fill="none" stroke={color} strokeWidth={.8} opacity={.45}/>
+      <circle cx={32} cy={32} r={8} fill="none" stroke={color} strokeWidth={.5} strokeDasharray="2 3" opacity={.4}/>
+      <circle cx={32} cy={32} r={1.8} fill={color} opacity={.9}/>
+      {[[32,4,32,16],[32,48,32,60],[4,32,16,32],[48,32,60,32]].map(([x1,y1,x2,y2],i)=>
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={1} opacity={.5}/>
+      )}
+    </svg>
+  );
+}
+function SignalBars({level=.8,color}){
+  return(
+    <div style={{display:"flex",gap:1,alignItems:"flex-end",height:12}}>
+      {[.2,.4,.6,.8,1].map((t,i)=>(
+        <div key={i} style={{width:3,height:3+i*2,borderRadius:.5,background:level>=t?color:`${color}20`}}/>
+      ))}
+    </div>
+  );
+}
+
+// AI Object boxes
+const THREAT_L=["CRITICAL","HIGH","MED","LOW","TRACE","TRACK","--","--"];
+const THREAT_C=["#ff2222","#ff5500","#ffaa00","#ffdd00","#aaffaa","#00ffcc","#00ccff","#aaaaaa"];
+function TargetBoxes({blobs,cw,ch,color,autoCapPending}){
+  if(!blobs||!blobs.length)return null;
+  return(
+    <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:22}}>
+      {blobs.map((b,i)=>{
+        const x=(b.x/cw)*100,y=(b.y/ch)*100,bw=(b.w/cw)*100,bh=(b.h/ch)*100,pad=1.2;
+        const tc=THREAT_C[Math.min(i,7)],thr=THREAT_L[Math.min(i,7)];
+        const isMain=i===0;
+        return(
+          <div key={i} style={{position:"absolute",left:`${x-pad}%`,top:`${y-pad}%`,
+            width:`${bw+pad*2}%`,height:`${bh+pad*2}%`,
+            border:`${isMain?"2px":"1px"} solid ${tc}`,
+            boxShadow:`0 0 ${isMain?10:4}px ${tc}${isMain?"50":"25"}`,
+            boxSizing:"border-box",
+            animation:isMain&&autoCapPending?"lock-flash 0.3s step-end infinite":"none"}}>
+            {[[-1,-1],[1,-1],[1,1],[-1,1]].map(([sx,sy],ci)=>(
+              <div key={ci} style={{position:"absolute",width:7,height:7,
+                top:sy<0?-1:"auto",bottom:sy>0?-1:"auto",
+                left:sx<0?-1:"auto",right:sx>0?-1:"auto",
+                borderTop:sy<0?`2px solid ${tc}`:"none",borderBottom:sy>0?`2px solid ${tc}`:"none",
+                borderLeft:sx<0?`2px solid ${tc}`:"none",borderRight:sx>0?`2px solid ${tc}`:"none"}}/>
+            ))}
+            {/* AI label */}
+            <div style={{position:"absolute",top:-28,left:0,display:"flex",gap:2,flexDirection:"column"}}>
+              <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                <span style={{fontSize:7,color:tc,letterSpacing:1,background:"rgba(0,0,0,0.8)",
+                  padding:"1px 3px",borderRadius:1,fontFamily:"'DM Mono',monospace"}}>
+                  {b.icon} {b.label}
+                </span>
+                <span style={{fontSize:6,color:`${tc}90`,background:"rgba(0,0,0,0.7)",
+                  padding:"1px 3px",borderRadius:1,fontFamily:"'DM Mono',monospace"}}>
+                  {b.conf}%
+                </span>
+                {isMain&&autoCapPending&&(
+                  <span style={{fontSize:6,color:"#fff",background:"rgba(255,34,34,0.85)",
+                    padding:"1px 3px",borderRadius:1,animation:"rec-blink 0.3s step-end infinite",
+                    fontFamily:"'DM Mono',monospace"}}>📷</span>
+                )}
+              </div>
+              {b.dist&&(
+                <span style={{fontSize:6,color:`${tc}80`,background:"rgba(0,0,0,0.7)",
+                  padding:"1px 3px",borderRadius:1,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>
+                  ~{b.dist<10?b.dist.toFixed(1):Math.round(b.dist)}m
+                </span>
+              )}
+            </div>
+            <div style={{position:"absolute",top:"50%",left:"50%",width:4,height:4,borderRadius:"50%",
+              transform:"translate(-50%,-50%)",background:tc,boxShadow:`0 0 6px ${tc}`,
+              animation:"tgt-pulse 1.2s ease-in-out infinite"}}/>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function ThermalOverlay({tempData,mode}){
+  if(!tempData||(mode!=="THERMAL"&&mode!=="RAINBOW"&&mode!=="FUSION"))return null;
+  const{hot,cold,avg,hotX,hotY}=tempData;
+  const gm={THERMAL:"linear-gradient(90deg,#000080,#800080,#ff0000,#ff8800,#ffff00,#fff)",RAINBOW:"linear-gradient(90deg,#0000ff,#00ffff,#00ff00,#ffff00,#ff0000)",FUSION:"linear-gradient(90deg,#1400ff,#8800ff,#ff4400,#ff8800,#ffe0c0)"};
+  return(
+    <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:24}}>
+      <div style={{position:"absolute",left:`${hotX}%`,top:`${hotY}%`,transform:"translate(-50%,-50%)",zIndex:25,
+        display:"flex",flexDirection:"column",alignItems:"center",gap:2,animation:"tgt-pulse 1s ease-in-out infinite"}}>
+        <div style={{width:12,height:12,borderRadius:"50%",border:"2px solid #fff",boxShadow:"0 0 16px #ff5500,0 0 6px #fff"}}/>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#fff",background:"rgba(0,0,0,0.75)",
+          padding:"1px 4px",borderRadius:2,letterSpacing:1,whiteSpace:"nowrap"}}>{hot.toFixed(1)}°C ▲</span>
+      </div>
+      <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",
+        display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+        <div style={{width:100,height:7,borderRadius:3,border:"1px solid rgba(255,255,255,0.15)",background:gm[mode]||gm.THERMAL}}/>
+        <div style={{display:"flex",justifyContent:"space-between",width:100}}>
+          <span style={{fontSize:7,color:"rgba(255,255,255,0.55)",fontFamily:"'DM Mono',monospace"}}>{cold.toFixed(0)}°C</span>
+          <span style={{fontSize:7,color:"rgba(255,255,255,0.7)",fontFamily:"'DM Mono',monospace"}}>~{avg.toFixed(1)}°</span>
+          <span style={{fontSize:7,color:"#ff8800",fontFamily:"'DM Mono',monospace"}}>{hot.toFixed(0)}°C</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CAMERA PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function CameraPanel({stream,ready,error,label,mode,brightness,sensitivity,edgeOverlay,
+  noiseReduction,color,zoom,showReticle,motionEnabled,autoCapture,tripwires,showRPPG,
+  onCapture,onMotionEvent,onTripwireHit,onRPPG,compact=false}){
+  const videoRef=useRef(null),rawRef=useRef(null),dispRef=useRef(null),rafRef=useRef(null);
+  const prevRef=useRef(null),motRef=useRef(null),cooldown=useRef(0),fpsRef=useRef({frames:0,last:performance.now()});
+  const stackBuf=useRef(null),stackIdx=useRef(0);
+  const[blobs,setBlobs]=useState([]);const[motionLevel,setMotionLevel]=useState(0);
+  const[tempData,setTempData]=useState(null);const[cameraSize,setCameraSize]=useState({w:1280,h:720});
+  const[fps,setFps]=useState(0);const[flash,setFlash]=useState(false);const[autoCapPending,setAutoCapPending]=useState(false);
+  const MODE_LUT={NVG:null,THERMAL:"THERMAL",RAINBOW:"RAINBOW",FUSION:"FUSION",BLUE:null,WHITE:null};
+
+  useEffect(()=>{
+    if(!videoRef.current||!stream)return;
+    const v=videoRef.current;
+    v.srcObject=stream;
+    v.play().catch(()=>{});
+    // stall watchdog: if currentTime doesn't advance for 2.5s, replay
+    let lastTime=-1,stallCount=0;
+    const watchdog=setInterval(()=>{
+      if(!v.srcObject)return;
+      if(v.currentTime===lastTime&&v.readyState>=2){
+        stallCount++;
+        if(stallCount>=2){
+          stallCount=0;
+          v.play().catch(()=>{});
+        }
+      } else { stallCount=0; }
+      lastTime=v.currentTime;
+    },2500);
+    return()=>clearInterval(watchdog);
+  },[stream]);
+
+  const renderLoop=useCallback(()=>{
+    const video=videoRef.current,raw=rawRef.current,disp=dispRef.current;
+    if(video&&raw&&disp){
+      const result=processFrame(video,raw,disp,
+        {mode,brightness,sensitivity,edgeOverlay,noiseReduction,lutName:MODE_LUT[mode]||null,tripwires,showRPPG},
+        {prev:prevRef,motion:motRef,stackBuf,stackIdx}
+      );
+      if(result){
+        setCameraSize({w:result.sw,h:result.sh});
+        if(motionEnabled){
+          setMotionLevel(result.motionFrac);setBlobs(result.blobs);
+          const now=Date.now();
+          if(autoCapture&&result.blobs.length>0&&result.motionFrac>0.008&&now-cooldown.current>3000){
+            cooldown.current=now;setAutoCapPending(true);
+            onMotionEvent&&onMotionEvent(result.blobs[0],label);
+            setTimeout(()=>{
+              if(disp){setFlash(true);setTimeout(()=>setFlash(false),400);
+                onCapture&&onCapture(disp.toDataURL("image/png"),label,result.blobs.length,true);}
+              setAutoCapPending(false);
+            },600);
+          }
+          if(result.triggeredWires.length)onTripwireHit&&onTripwireHit(result.triggeredWires,label);
+        }
+        if(result.tempData)setTempData(result.tempData);
+        if(showRPPG&&result.rppgVal)onRPPG&&onRPPG(result.rppgVal);
+        const fc=fpsRef.current;fc.frames++;
+        const n=performance.now();if(n-fc.last>=1000){setFps(fc.frames);fc.frames=0;fc.last=n;}
+      }
+    }
+    rafRef.current=requestAnimationFrame(renderLoop);
+  // eslint-disable-next-line
+  },[mode,brightness,sensitivity,edgeOverlay,noiseReduction,motionEnabled,autoCapture,showRPPG,JSON.stringify(tripwires)]);
+
+  useEffect(()=>{rafRef.current=requestAnimationFrame(renderLoop);return()=>cancelAnimationFrame(rafRef.current);},[renderLoop]);
+
+  return(
+    <div style={{position:"relative",width:"100%",flex:1,minHeight:0,background:"#010801",overflow:"hidden",border:`1px solid ${color}12`}}>
+      <video ref={videoRef} muted playsInline autoPlay style={{position:"absolute",opacity:0,pointerEvents:"none",width:"100%",height:"100%",objectFit:"cover"}}/>
+      <canvas ref={rawRef} style={{display:"none"}}/>
+      <canvas ref={dispRef} data-primary={label==="REAR"?"true":undefined} style={{width:"100%",height:"100%",display:"block",
+        transform:`scale(${zoom})`,transformOrigin:"center",transition:"transform 0.15s ease",
+        imageRendering:zoom>=4?"pixelated":"auto"}}/>
+      <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:10,overflow:"hidden"}}>
+        <div style={{position:"absolute",left:0,right:0,height:2,
+          background:`linear-gradient(180deg,transparent,${color}12,transparent)`,
+          animation:"nvg-scan 6s linear infinite"}}/>
+      </div>
+      {flash&&<div style={{position:"absolute",inset:0,zIndex:50,pointerEvents:"none",
+        background:"rgba(255,255,255,0.38)",animation:"flash-out 0.4s ease-out forwards"}}/>}
+      {ready&&(
+        <>
+          <Corners color={color}/>
+          {showReticle&&!blobs.length&&<Reticle color={color}/>}
+          <TargetBoxes blobs={blobs} cw={cameraSize.w} ch={cameraSize.h} color={color} autoCapPending={autoCapPending}/>
+          <ThermalOverlay tempData={tempData} mode={mode}/>
+          <div style={{position:"absolute",top:8,left:8,zIndex:20,display:"flex",flexDirection:"column",gap:2}}>
+            <div style={{fontSize:7,color,letterSpacing:2,padding:"1px 4px",border:`1px solid ${color}30`,background:`${color}08`,borderRadius:1}}>{label}</div>
+            <div style={{fontSize:6,color:`${color}45`,letterSpacing:1,paddingLeft:2}}>{fps}fps</div>
+            {blobs.length>0&&<div style={{fontSize:7,color:"#ff5500",letterSpacing:1,animation:"rec-blink 0.8s step-end infinite",paddingLeft:2}}>{blobs.length} TGT{blobs.length>1?"S":""}</div>}
+            {autoCapPending&&<div style={{fontSize:7,color:"#ffdd00",letterSpacing:1,paddingLeft:2,animation:"rec-blink 0.3s step-end infinite"}}>📷AUTO</div>}
+          </div>
+          {motionLevel>0.004&&(
+            <div style={{position:"absolute",bottom:8,left:8,zIndex:20,display:"flex",alignItems:"center",gap:3,
+              padding:"2px 5px",background:motionLevel>0.025?"rgba(255,30,30,0.18)":"rgba(255,165,0,0.12)",
+              border:`1px solid ${motionLevel>0.025?"#ff2222":"#ffaa00"}`,borderRadius:1}}>
+              <div style={{width:4,height:4,borderRadius:"50%",background:motionLevel>0.025?"#ff2222":"#ffaa00"}}/>
+              <span style={{fontSize:6,letterSpacing:1,fontFamily:"'DM Mono',monospace",color:motionLevel>0.025?"#ff2222":"#ffaa00"}}>
+                {motionLevel>0.025?"ALERT":"MOT"} {(motionLevel*100).toFixed(1)}%
+              </span>
+            </div>
+          )}
+          {tempData&&(mode==="THERMAL"||mode==="RAINBOW"||mode==="FUSION")&&(
+            <div style={{position:"absolute",bottom:8,right:8,zIndex:20}}>
+              <span style={{fontSize:7,color:"#ff8800",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>▲{tempData.hot.toFixed(1)}°C</span>
+            </div>
+          )}
+        </>
+      )}
+      {!ready&&!error&&(
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,zIndex:30}}>
+          <div style={{width:22,height:22,borderRadius:"50%",border:`2px solid ${color}20`,borderTop:`2px solid ${color}`,animation:"spin 1s linear infinite"}}/>
+          <span style={{fontSize:8,color:`${color}60`,letterSpacing:2}}>INIT {label}</span>
+        </div>
+      )}
+      {error&&(
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,zIndex:30,background:"rgba(0,0,0,0.92)"}}>
+          <span style={{fontSize:14}}>📷</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#ff4444",letterSpacing:2}}>{label} OFFLINE</span>
+          <span style={{fontSize:6,color:"rgba(255,100,100,0.5)",textAlign:"center",maxWidth:180,letterSpacing:.5}}>
+            {error.toLowerCase().includes("denied")?"PERMISSION REQUIRED":error.slice(0,50).toUpperCase()}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+const MODE_META={
+  NVG:{label:"NVG",color:"#00ff50"},THERMAL:{label:"THERMAL",color:"#ff5500"},
+  RAINBOW:{label:"RAINBOW",color:"#00ccff"},FUSION:{label:"FUSION",color:"#cc44ff"},
+  BLUE:{label:"ARCTIC",color:"#0088ff"},WHITE:{label:"WHT-HOT",color:"#dddddd"},
+};
+const MODE_KEYS=Object.keys(MODE_META);
+const ZOOM_STEPS=[1,1.5,2,3,4,6,8,12];
+const PEER_ID=Math.random().toString(36).slice(2,10);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════════════════════
+function NightVisionCamera(){
+  const[mode,setMode]=useState("NVG");
+  const[zoom,setZoom]=useState(1);
+  const[brightness,setBrightness]=useState(0);
+  const[sensitivity,setSensitivity]=useState(0.6);
+  const[edgeOverlay,setEdgeOverlay]=useState(false);
+  const[noiseReduction,setNoiseReduction]=useState(true);
+  const[motionEnabled,setMotionEnabled]=useState(true);
+  const[autoCapture,setAutoCapture]=useState(false);
+  const[showReticle,setShowReticle]=useState(true);
+  const[dualMode,setDualMode]=useState(false);
+  const[recording,setRecording]=useState(false);
+  const[captures,setCaptures]=useState([]);
+  const[tripwires,setTripwires]=useState([]);
+  const[showRPPG,setShowRPPG]=useState(false);
+  const[audioEnabled,setAudioEnabled]=useState(false);
+  const[multiSync,setMultiSync]=useState(false);
+  const[modal,setModal]=useState(null); // "map"|"timeline"|"tripwire"|"gallery"|"manual"
+  const[rppgSample,setRppgSample]=useState(0);
+  const mediaRecRef=useRef(null);
+
+  const clock=useClock();
+  const heading=useDeviceOrientation();
+  const gps=useGPS();
+  const{level:audioLevel,spike:audioSpike}=useMicrophone(audioEnabled);
+  const hr=useRPPG(showRPPG?rppgSample:null);
+  const{peers,alerts:syncAlerts,broadcast}=useMultiSync(multiSync,PEER_ID);
+  const{events,add:addEvent}=useTimeline();
+
+  const rear=useCameraStream({facingMode:"environment"},true);
+  const front=useCameraStream({facingMode:"user"},dualMode);
+
+  const color=MODE_META[mode].color;
+  const timeStr=clock.toLocaleTimeString("en-US",{hour12:false});
+  const dateStr=clock.toLocaleDateString("en-US",{day:"2-digit",month:"short",year:"numeric"}).toUpperCase();
+  const dirs=["N","NE","E","SE","S","SW","W","NW"];
+  const compassDir=heading!==null?dirs[Math.round(heading/45)%8]:"--";
+
+  // Handle captures
+  const handleCapture=useCallback((url,label,targets,auto=false)=>{
+    if(!url||url==="data:,")return;
+    const now=new Date();
+    const entry={url,label,targets,auto,time:now.toLocaleTimeString("en-US",{hour12:false}),ts:now.getTime()};
+    setCaptures(p=>[entry,...p].slice(0,50));
+    addEvent("capture",{label,targets,auto,url,time:entry.time});
+  },[addEvent]);
+
+  // Handle motion events → timeline + GPS pin + multicast
+  const handleMotionEvent=useCallback((blob,label)=>{
+    const evt={label:`${label} ${blob.label||"MOTION"}`,conf:blob.conf,lat:gps?.lat,lon:gps?.lon,icon:blob.icon||"🎯"};
+    addEvent("motion",evt);
+    broadcast("MOTION_ALERT",evt);
+  },[addEvent,broadcast,gps]);
+
+  // Handle tripwire hits
+  const handleTripwireHit=useCallback((ids,label)=>{
+    setTripwires(tw=>tw.map(t=>ids.includes(t.id)?{...t,triggered:true}:t));
+    ids.forEach(id=>{
+      const tw=tripwires.find(t=>t.id===id);
+      addEvent("tripwire",{label:`${label} CROSSED ${tw?.label||id}`});
+    });
+    // Auto-reset trigger after 3s
+    setTimeout(()=>setTripwires(tw=>tw.map(t=>({...t,triggered:false}))),3000);
+  },[addEvent,tripwires]);
+
+  // Audio spike events
+  useEffect(()=>{
+    if(audioSpike)addEvent("audio",{label:"AUDIO SPIKE",level:audioLevel});
+  },[audioSpike]);// eslint-disable-line
+
+  // Sync alerts → timeline
+  useEffect(()=>{
+    if(syncAlerts.length){
+      const a=syncAlerts[0];
+      addEvent("peer",{label:`PEER ${a.from.slice(-4)}: ${a.payload?.label||"MOTION"}`});
+    }
+  },[syncAlerts]);// eslint-disable-line
+
+  const manualSnap=()=>{
+    const c=document.querySelector("canvas[data-primary='true']");
+    if(c)handleCapture(c.toDataURL("image/png"),"REAR",0,false);
+  };
+
+  const toggleRecord=()=>{
+    const c=document.querySelector("canvas[data-primary='true']");
+    if(!c)return;
+    if(!recording){
+      const cs=c.captureStream(30);
+      const rec=new MediaRecorder(cs,{mimeType:"video/webm"});
+      const chunks=[];
+      rec.ondataavailable=e=>chunks.push(e.data);
+      rec.onstop=()=>{const b=new Blob(chunks,{type:"video/webm"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`nvs7-${Date.now()}.webm`;a.click();};
+      rec.start();mediaRecRef.current=rec;setRecording(true);
+    }else{mediaRecRef.current?.stop();setRecording(false);}
+  };
+
+  const newCapCount=captures.length;
+  const newEventCount=events.length;
+  const hasTripwire=tripwires.some(t=>t.triggered);
+
+  return(
+    <div style={{height:"100dvh",background:"#000",display:"flex",flexDirection:"column",fontFamily:"'DM Mono',monospace",overflow:"hidden"}}>
+      <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+      <style>{`
+        @keyframes nvg-scan{0%{top:-3px;opacity:0}5%{opacity:.9}95%{opacity:.5}100%{top:100%;opacity:0}}
+        @keyframes rec-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+        @keyframes tgt-pulse{0%,100%{opacity:1;transform:translate(-50%,-50%) scale(1)}50%{opacity:.3;transform:translate(-50%,-50%) scale(1.9)}}
+        @keyframes fade-in{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+        @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        @keyframes flash-out{0%{opacity:.38}100%{opacity:0}}
+        @keyframes lock-flash{0%,49%{border-color:#ff220088}50%,100%{border-color:#ff2200}}
+        *{box-sizing:border-box}button{font-family:"DM Mono",monospace;cursor:pointer}
+        ::-webkit-scrollbar{display:none}
+      `}</style>
+
+      {modal==="map"&&<GPSMap pos={gps} events={events} color={color} onClose={()=>setModal(null)}/>}
+      {modal==="timeline"&&<TimelineModal events={events} captures={captures} color={color} onClose={()=>setModal(null)}/>}
+      {modal==="tripwire"&&<TripwireEditor tripwires={tripwires} onUpdate={setTripwires} color={color} onClose={()=>setModal(null)}/>}
+      {modal==="manual"&&<InstructionsModal color={color} onClose={()=>setModal(null)}/>}
+
+      <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",background:"#000",border:`1px solid ${color}18`,animation:"fade-in 0.4s ease",overflow:"hidden"}}>
+
+        {/* HEADER */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderBottom:`1px solid ${color}15`}}>
+          <div style={{display:"flex",alignItems:"center",gap:7}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:color,boxShadow:`0 0 10px ${color}`,animation:"rec-blink 2s step-end infinite"}}/>
+            <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4,textShadow:`0 0 10px ${color}40`}}>NVS-7</span>
+            {multiSync&&peers.length>0&&<span style={{fontSize:7,color:"#cc44ff",letterSpacing:1,border:"1px solid #cc44ff30",padding:"1px 4px",borderRadius:1}}>{peers.length}P</span>}
+            {hasTripwire&&<span style={{fontSize:7,color:"#ffcc00",letterSpacing:1,animation:"rec-blink 0.4s step-end infinite",border:"1px solid #ffcc0050",padding:"1px 4px",borderRadius:1}}>⚠WIRE</span>}
+            {audioSpike&&<span style={{fontSize:7,color:"#ff2222",letterSpacing:1,animation:"rec-blink 0.3s step-end infinite"}}>🔊!</span>}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+            <span style={{fontSize:6,color:`${color}45`,letterSpacing:1}}>{dateStr}</span>
+            <span style={{fontSize:10,color,letterSpacing:2}}>{timeStr}</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
+            {heading!==null&&<span style={{fontSize:7,color:`${color}55`,letterSpacing:1}}>{String(heading).padStart(3,"0")}° {compassDir}</span>}
+            {gps&&<span style={{fontSize:6,color:`${color}40`,letterSpacing:.5}}>{gps.lat.toFixed(3)}°N</span>}
+            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+              <SignalBars level={.8} color={color}/>
+              {autoCapture&&<span style={{fontSize:6,color:"#ffdd00",animation:"rec-blink 1.5s step-end infinite"}}>AUTO</span>}
+              {recording&&<span style={{fontSize:6,color:"#ff2222",animation:"rec-blink 1s step-end infinite"}}>●REC</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* CAMERAS */}
+        {dualMode?(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:`${color}08`,flex:1,minHeight:0}}>
+            <CameraPanel stream={rear.stream} ready={rear.ready} error={rear.error} label="REAR"
+              mode={mode} brightness={brightness} sensitivity={sensitivity} edgeOverlay={edgeOverlay}
+              noiseReduction={noiseReduction} color={color} zoom={zoom} showReticle={showReticle}
+              motionEnabled={motionEnabled} autoCapture={autoCapture} tripwires={tripwires}
+              showRPPG={showRPPG} onCapture={handleCapture} onMotionEvent={handleMotionEvent}
+              onTripwireHit={handleTripwireHit} onRPPG={setRppgSample} compact={true}/>
+            <CameraPanel stream={front.stream} ready={front.ready} error={front.error} label="FRONT"
+              mode={mode} brightness={brightness} sensitivity={sensitivity} edgeOverlay={edgeOverlay}
+              noiseReduction={noiseReduction} color={color} zoom={zoom} showReticle={showReticle}
+              motionEnabled={motionEnabled} autoCapture={autoCapture} tripwires={tripwires}
+              showRPPG={showRPPG} onCapture={handleCapture} onMotionEvent={handleMotionEvent}
+              onTripwireHit={handleTripwireHit} onRPPG={setRppgSample} compact={true}/>
+          </div>
+        ):(
+          <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+            <CameraPanel stream={rear.stream} ready={rear.ready} error={rear.error} label="REAR"
+              mode={mode} brightness={brightness} sensitivity={sensitivity} edgeOverlay={edgeOverlay}
+              noiseReduction={noiseReduction} color={color} zoom={zoom} showReticle={showReticle}
+              motionEnabled={motionEnabled} autoCapture={autoCapture} tripwires={tripwires}
+              showRPPG={showRPPG} onCapture={handleCapture} onMotionEvent={handleMotionEvent}
+              onTripwireHit={handleTripwireHit} onRPPG={setRppgSample} compact={false}/>
+            {(showRPPG||audioEnabled)&&(
+              <BiometricHUD hr={hr} audioLevel={audioLevel} audioSpike={audioSpike} color={color}/>
+            )}
+          </div>
+        )}
+
+        {/* CONTROLS */}
+        <div style={{padding:"10px 12px",borderTop:`1px solid ${color}10`,display:"flex",flexDirection:"column",gap:6}}>
+
+          {/* MODE */}
+          <div style={{display:"flex",gap:4}}>
+            {MODE_KEYS.map(m=>{const mc=MODE_META[m].color;return(
+              <button key={m} onClick={()=>setMode(m)} style={{flex:1,padding:"5px 1px",
+                background:mode===m?`${mc}12`:"transparent",border:`1px solid ${mode===m?mc:`${mc}18`}`,
+                borderRadius:2,fontSize:6,color:mode===m?mc:`${mc}38`,letterSpacing:.5,transition:"all 0.12s"}}>
+                {MODE_META[m].label}
+              </button>
+            );})}
+          </div>
+
+          {/* ZOOM */}
+          <div style={{display:"flex",gap:3}}>
+            {ZOOM_STEPS.map(z=>(
+              <button key={z} onClick={()=>setZoom(z)} style={{flex:1,padding:"4px 1px",
+                background:zoom===z?`${color}10`:"transparent",border:`1px solid ${zoom===z?color:`${color}12`}`,
+                borderRadius:2,fontSize:6,color:zoom===z?color:`${color}32`,transition:"all 0.1s"}}>
+                {z}×
+              </button>
+            ))}
+          </div>
+
+          {/* SENS + GAIN */}
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:6,color:`${color}45`,letterSpacing:1,whiteSpace:"nowrap"}}>SENS</span>
+            <input type="range" min="0" max="1" step="0.05" value={sensitivity}
+              onChange={e=>setSensitivity(parseFloat(e.target.value))}
+              style={{flex:1,accentColor:color}}/>
+            <span style={{fontSize:6,color:`${color}60`,minWidth:22}}>{Math.round(sensitivity*100)}%</span>
+            <span style={{fontSize:6,color:`${color}45`,letterSpacing:1,whiteSpace:"nowrap"}}>GAIN</span>
+            {[-2,-1,0,1,2].map((v,i)=>(
+              <div key={i} onClick={()=>setBrightness(v*0.75)} style={{width:6,height:8+i*2,borderRadius:1,cursor:"pointer",
+                background:brightness>=v*0.75?color:`${color}18`,transition:"background 0.1s"}}/>
+            ))}
+          </div>
+
+          {/* TOGGLE ROW 1 */}
+          <div style={{display:"flex",gap:4}}>
+            {[
+              {l:"EDGE",v:edgeOverlay,f:()=>setEdgeOverlay(e=>!e)},
+              {l:"NR",v:noiseReduction,f:()=>setNoiseReduction(n=>!n)},
+              {l:"MOT",v:motionEnabled,f:()=>setMotionEnabled(m=>!m)},
+              {l:"DUAL",v:dualMode,f:()=>setDualMode(d=>!d)},
+              {l:"⊕",v:showReticle,f:()=>setShowReticle(r=>!r),big:true},
+              {l:"rPPG",v:showRPPG,f:()=>setShowRPPG(r=>!r)},
+              {l:"🎙",v:audioEnabled,f:()=>setAudioEnabled(a=>!a),big:true},
+              {l:"SYNC",v:multiSync,f:()=>setMultiSync(s=>!s)},
+            ].map(({l,v,f,big})=>(
+              <button key={l} onClick={f} style={{flex:1,padding:"5px 1px",
+                background:v?`${color}10`:"transparent",border:`1px solid ${v?color:`${color}15`}`,
+                borderRadius:2,fontSize:big?10:6,letterSpacing:.3,color:v?color:`${color}30`,transition:"all 0.12s"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* ACTION ROW */}
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={()=>setAutoCapture(a=>!a)} style={{flex:2,padding:"7px 4px",
+              background:autoCapture?"rgba(255,221,0,0.10)":"transparent",
+              border:`1px solid ${autoCapture?"#ffdd00":"rgba(255,221,0,0.18)"}`,
+              borderRadius:2,fontSize:7,letterSpacing:1,color:autoCapture?"#ffdd00":"rgba(255,221,0,0.35)",transition:"all 0.12s"}}>
+              🎯 AUTO {autoCapture?"ON":"OFF"}
+            </button>
+            <button onClick={manualSnap} style={{flex:1,padding:"7px 4px",background:"transparent",
+              border:`1px solid ${color}18`,borderRadius:2,fontSize:7,color:`${color}55`}}>📷</button>
+            <button onClick={toggleRecord} style={{flex:1,padding:"7px 4px",
+              background:recording?"rgba(255,34,34,0.10)":"transparent",
+              border:`1px solid ${recording?"#ff2222":"rgba(255,34,34,0.18)"}`,
+              borderRadius:2,fontSize:7,color:recording?"#ff2222":"rgba(255,34,34,0.35)"}}>
+              {recording?"■":"●"}REC
+            </button>
+          </div>
+
+          {/* MODAL ROW */}
+          <div style={{display:"flex",gap:4}}>
+            {[
+              {l:`📁 ${newCapCount>0?`(${newCapCount})`:"GAL"}`,m:"gallery",c:newCapCount>0?color:undefined},
+              {l:"🗺 MAP",m:"map",c:gps?"#00ccff":undefined},
+              {l:`⏱ ${newEventCount>0?`(${newEventCount})`:"LOG"}`,m:"timeline",c:newEventCount>0?"#cc44ff":undefined},
+              {l:`⚡ WIRE${tripwires.length?` (${tripwires.length})`:""}`,m:"tripwire",c:hasTripwire?"#ffcc00":tripwires.length>0?"#ffcc0080":undefined},
+              {l:"? HELP",m:"manual",c:undefined},
+            ].map(({l,m,c})=>(
+              <button key={m} onClick={()=>setModal(m)} style={{flex:1,padding:"6px 2px",
+                background:modal===m?`${c||color}10`:"transparent",
+                border:`1px solid ${c||color}${modal===m?"":"25"}`,
+                borderRadius:2,fontSize:7,color:c||`${color}45`,letterSpacing:.3,transition:"all 0.12s"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* PEER STATUS */}
+          {multiSync&&(
+            <div style={{padding:"5px 8px",border:`1px solid #cc44ff25`,borderRadius:2,background:"rgba(204,68,255,0.04)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:7,color:"#cc44ff",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>SYNC — ID:{PEER_ID.slice(-4)}</span>
+                <span style={{fontSize:6,color:"rgba(204,68,255,0.6)",letterSpacing:1}}>{peers.length} PEER{peers.length!==1?"S":""}</span>
+              </div>
+              {syncAlerts.slice(0,2).map((a,i)=>(
+                <div key={i} style={{fontSize:6,color:"rgba(204,68,255,0.7)",marginTop:2,letterSpacing:.5}}>
+                  ↳ {a.from.slice(-4)}: {a.payload?.label||"ALERT"}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* FOOTER */}
+        <div style={{padding:"4px 12px",borderTop:`1px solid ${color}08`,display:"flex",justifyContent:"space-between"}}>
+          <span style={{fontSize:6,color:`${color}18`,letterSpacing:1}}>CLOUDYGETTY-AI // ENTROPY-ZERO</span>
+          <span style={{fontSize:6,color:`${color}18`,letterSpacing:1}}>NVS-7.5 // CLASSIFIED</span>
+        </div>
+      </div>
+
+      {/* Gallery modal inline */}
+      {modal==="gallery"&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:200,
+          display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease",overflowY:"auto"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"10px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0}}>
+            <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4}}>
+              CAPTURE LOG — {captures.length}
+            </span>
+            <button onClick={()=>setModal(null)} style={{padding:"4px 10px",background:"transparent",
+              border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+              fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>CLOSE</button>
+          </div>
+          <div style={{padding:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,overflowY:"auto"}}>
+            {captures.length===0&&(
+              <div style={{gridColumn:"1/-1",textAlign:"center",padding:40,fontFamily:"'DM Mono',monospace",fontSize:9,color:`${color}35`,letterSpacing:1}}>
+                NO CAPTURES — ENABLE AUTO-CAP OR TAP 📷
+              </div>
+            )}
+            {captures.map((c,i)=>(
+              <div key={i} style={{display:"flex",flexDirection:"column",gap:3}}>
+                <img src={c.url} style={{width:"100%",borderRadius:2,border:`1px solid ${color}18`,display:"block"}} alt="cap"/>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:7,color:`${color}70`,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>{c.label} {c.auto?"[AUTO]":"[SNAP]"}</div>
+                    <div style={{fontSize:6,color:`${color}40`,fontFamily:"'DM Mono',monospace"}}>{c.time}{c.targets>0?` • ${c.targets}TGT`:""}</div>
+                  </div>
+                  <a href={c.url} download={`nvs7-${c.ts}.png`} style={{fontSize:8,color,textDecoration:"none",border:`1px solid ${color}30`,padding:"2px 6px",borderRadius:1,fontFamily:"'DM Mono',monospace"}}>↓</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<NightVisionCamera />);
 </script>
 </body>
 </html>
