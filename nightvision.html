@@ -3,21 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<title>VIGIL — Night Vision</title>
-<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>VIGIL — Night Vision NVS-7.5</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{width:100%;height:100%;overflow:hidden;background:#000}
+input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:transparent;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;cursor:pointer}
 ::-webkit-scrollbar{display:none}
+button{font-family:"DM Mono",monospace;cursor:pointer;-webkit-tap-highlight-color:transparent}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-import{useState,useEffect,useRef,useCallback,useMemo}from"react";
+const{useState,useEffect,useRef,useCallback,useMemo}=React;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LUT BUILDER
@@ -95,7 +101,7 @@ function applyCLAHE(data,w,h,tiles=6,clip=3.5){
 
 // NVG-specific extreme CLAHE — 10x10 tiles, high clip, on green channel only
 function applyNVGCLAHE(data,w,h){
-  const tiles=10,clip=8.0;
+  const tiles=8,clip=6.0;
   const tW=Math.floor(w/tiles),tH=Math.floor(h/tiles);
   // Extract green channel into temp array, equalize it, write back
   const green=new Uint8Array(w*h);
@@ -151,25 +157,32 @@ function temporalBlend(data,history,alpha=0.75){
 
 // Phosphor bloom: soft-glow on bright green pixels (real NVG has halation)
 function applyPhosphorBloom(data,w,h){
-  // Box-blur the green channel at 4px radius, add back scaled
   const g=new Float32Array(w*h);
   for(let i=0;i<data.length;i+=4) g[i/4]=data[i+1];
-  const blurred=new Float32Array(w*h);
   const r=4;
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-    let sum=0,cnt=0;
-    for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
-      const nx=x+dx,ny=y+dy;
-      if(nx>=0&&nx<w&&ny>=0&&ny<h){sum+=g[ny*w+nx];cnt++;}
+  // Separable box blur — horizontal then vertical
+  const tmp=new Float32Array(w*h);
+  const blurred=new Float32Array(w*h);
+  for(let y=0;y<h;y++){
+    let sum=0;
+    for(let x=-r;x<=r;x++) sum+=g[y*w+Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){
+      tmp[y*w+x]=sum/(r*2+1);
+      sum+=g[y*w+Math.min(w-1,x+r+1)]-g[y*w+Math.max(0,x-r)];
     }
-    blurred[y*w+x]=sum/cnt;
   }
-  // Add glow: brighter pixels bloom more
+  for(let x=0;x<w;x++){
+    let sum=0;
+    for(let y=-r;y<=r;y++) sum+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
+    for(let y=0;y<h;y++){
+      blurred[y*w+x]=sum/(r*2+1);
+      sum+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.max(0,y-r)*w+x];
+    }
+  }
   for(let i=0;i<data.length;i+=4){
     const pi=i/4;
     const glow=blurred[pi]*0.35;
     data[i+1]=Math.min(255,data[i+1]+glow);
-    // Slight red tint at peak brightness (real P43 phosphor characteristic)
     if(data[i+1]>200) data[i]=Math.min(255,data[i]+data[i+1]*0.04);
   }
 }
@@ -260,11 +273,14 @@ function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
   const lut=LUTS[lutName]||null;
   const tempSamples=[];
 
+  // Day vision modes skip NVG/thermal pipeline entirely
+  const isDayMode=mode==="TACT"||mode==="HAZE"||mode==="POLAR"||mode==="RAW";
+
   // NVG: extreme processing pipeline
   let stackedLum=null;
-  if(mode==="NVG"){
+  if(mode==="NVG"&&!isDayMode){
     // Step 1: frame stacking (8 frames) to pull signal from sensor noise
-    stackedLum=stackFrames(data,refs.stackBuf,refs.stackIdx,8);
+    stackedLum=stackFrames(data,refs.stackBuf,refs.stackIdx,4);
     // Step 2: apply stacked luminance back into green channel before CLAHE
     if(stackedLum){
       for(let i=0;i<data.length;i+=4){
@@ -274,12 +290,12 @@ function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
     }
     // Step 3: extreme CLAHE on green channel only
     applyNVGCLAHE(data,sw,sh);
-  } else if(mode==="WHITE"||mode==="FUSION"){
+  } else if((mode==="WHITE"||mode==="FUSION")&&!isDayMode){
     applyCLAHE(data,sw,sh,6,3.5);
   }
 
-  const bri=(mode==="NVG"?4.5:mode==="WHITE"?3.0:2.0)+brightness*1.5;
-  const con=mode==="NVG"?2.8:mode==="WHITE"?2.4:2.1;
+  const bri=isDayMode?1.0:(mode==="NVG"?4.5:mode==="WHITE"?3.0:2.0)+brightness*1.5;
+  const con=isDayMode?1.0:(mode==="NVG"?2.8:mode==="WHITE"?2.4:2.1);
   const mid=128;
 
   for(let i=0;i<data.length;i+=4){
@@ -305,6 +321,9 @@ function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
     }else if(mode==="BLUE"){
       data[i]=Math.min(255,boosted*0.12);data[i+1]=Math.min(255,boosted*0.32);data[i+2]=Math.min(255,boosted*1.15+b*0.25);
       const n=(Math.random()-.5)*7;data[i+2]=Math.max(0,Math.min(255,data[i+2]+n));
+    }else if(mode==="TACT"||mode==="HAZE"||mode==="POLAR"||mode==="RAW"){
+      // Day / raw modes: pass-through untouched
+      data[i]=r;data[i+1]=g;data[i+2]=b;
     }else{const w2=Math.min(255,boosted);data[i]=data[i+1]=data[i+2]=w2;}
 
     if(edgeOverlay&&edges){
@@ -327,6 +346,11 @@ function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
   // Phosphor bloom pass (NVG only) — after pixel processing, before output
   if(mode==="NVG") applyPhosphorBloom(data,sw,sh);
 
+  // Day vision bulk passes (operate on full frame after pixel loop)
+  if(mode==="TACT") applyTactical(data,sw,sh,brightness);
+  if(mode==="HAZE") { applyDehaze(data,sw,sh,0.65); applyUnsharpMask(data,sw,sh,1.2,2); }
+  if(mode==="POLAR") applyPolarize(data,sw,sh);
+
   rawCtx.putImageData(imageData,0,0);
   const dCtx=dispCanvas.getContext("2d");
   dCtx.drawImage(rawCanvas,0,0);
@@ -343,6 +367,30 @@ function processFrame(video,rawCanvas,dispCanvas,cfg,refs){
     dCtx.fillStyle=cg;dCtx.fillRect(0,0,sw,sh);
     // Subtle green ambient glow overlay
     dCtx.fillStyle="rgba(0,255,60,0.03)";dCtx.fillRect(0,0,sw,sh);
+  } else if(mode==="RAW"){
+    // No overlay — pure passthrough, minimal vignette only
+  } else if(mode==="TACT"){
+    // Tactical: amber HUD tint + faint grid overlay
+    dCtx.fillStyle="rgba(255,220,50,0.03)";dCtx.fillRect(0,0,sw,sh);
+    dCtx.strokeStyle="rgba(255,220,50,0.05)";dCtx.lineWidth=1;
+    for(let x=0;x<sw;x+=40){dCtx.beginPath();dCtx.moveTo(x,0);dCtx.lineTo(x,sh);dCtx.stroke();}
+    for(let y=0;y<sh;y+=40){dCtx.beginPath();dCtx.moveTo(0,y);dCtx.lineTo(sw,y);dCtx.stroke();}
+    // Sharp vignette
+    const tv=dCtx.createRadialGradient(sw/2,sh/2,sh*0.3,sw/2,sh/2,sh*0.75);
+    tv.addColorStop(0,"rgba(0,0,0,0)");tv.addColorStop(1,"rgba(0,0,0,0.45)");
+    dCtx.fillStyle=tv;dCtx.fillRect(0,0,sw,sh);
+  } else if(mode==="HAZE"){
+    // Dehaze: cool blue clarifying tint
+    dCtx.fillStyle="rgba(80,200,255,0.04)";dCtx.fillRect(0,0,sw,sh);
+    const hv=dCtx.createRadialGradient(sw/2,sh/2,sh*0.4,sw/2,sh/2,sh*0.85);
+    hv.addColorStop(0,"rgba(0,0,0,0)");hv.addColorStop(1,"rgba(0,0,0,0.35)");
+    dCtx.fillStyle=hv;dCtx.fillRect(0,0,sw,sh);
+  } else if(mode==="POLAR"){
+    // Polarize: pink-magenta frame tint
+    dCtx.fillStyle="rgba(255,80,180,0.04)";dCtx.fillRect(0,0,sw,sh);
+    const pv=dCtx.createRadialGradient(sw/2,sh/2,sh*0.35,sw/2,sh/2,sh*0.8);
+    pv.addColorStop(0,"rgba(0,0,0,0)");pv.addColorStop(1,"rgba(0,0,0,0.40)");
+    dCtx.fillStyle=pv;dCtx.fillRect(0,0,sw,sh);
   } else {
     dCtx.fillStyle="rgba(0,0,0,0.04)";
     for(let y=0;y<sh;y+=3)dCtx.fillRect(0,y,sw,1);
@@ -503,6 +551,124 @@ function useRPPG(samples){
   },[samples]);
   return hr;
 }
+// Hardware torch control
+function useTorch(){
+  const trackRef=useRef(null);
+  const[torchOn,setTorchOn]=useState(false);
+  const[supported,setSupported]=useState(false);
+  const toggle=useCallback(async()=>{
+    if(!trackRef.current){
+      try{
+        const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        const t=s.getVideoTracks()[0];
+        const caps=t.getCapabilities?.();
+        if(caps?.torch){trackRef.current=t;setSupported(true);}
+        else{s.getTracks().forEach(t=>t.stop());return;}
+      }catch{return;}
+    }
+    const next=!torchOn;
+    try{await trackRef.current.applyConstraints({advanced:[{torch:next}]});setTorchOn(next);}catch{}
+  },[torchOn]);
+  useEffect(()=>()=>{if(trackRef.current){trackRef.current.applyConstraints({advanced:[{torch:false}]}).catch(()=>{});}},[]);
+  return{torchOn,toggle,supported:true};
+}
+
+// Accelerometer shake detection
+function useShake(enabled){
+  const[shakeCount,setShakeCount]=useState(0);
+  const[impact,setImpact]=useState(false);
+  const lastRef=useRef({x:0,y:0,z:0,t:0});
+  useEffect(()=>{
+    if(!enabled)return;
+    const handler=e=>{
+      const{x,y,z}=e.accelerationIncludingGravity||e.acceleration||{};
+      if(x==null)return;
+      const now=Date.now();
+      const last=lastRef.current;
+      const dt=Math.max(1,now-last.t);
+      const jerk=Math.sqrt((x-last.x)**2+(y-last.y)**2+(z-last.z)**2)/dt*100;
+      lastRef.current={x,y,z,t:now};
+      if(jerk>18){
+        setShakeCount(c=>c+1);
+        setImpact(true);
+        setTimeout(()=>setImpact(false),800);
+      }
+    };
+    window.addEventListener("devicemotion",handler);
+    return()=>window.removeEventListener("devicemotion",handler);
+  },[enabled]);
+  return{shakeCount,impact};
+}
+
+// Wind speed estimation via mic FFT (low-freq rumble)
+function useWindSpeed(enabled,analyserRef){
+  const[wind,setWind]=useState(0);
+  useEffect(()=>{
+    if(!enabled||!analyserRef?.current)return;
+    const interval=setInterval(()=>{
+      const analyser=analyserRef.current;
+      if(!analyser)return;
+      const buf=new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(buf);
+      // Wind = low freq energy (bins 0-10, ~0-200Hz)
+      const lowFreq=buf.slice(0,10).reduce((s,v)=>s+v,0)/10;
+      // Map 0-80 avg amplitude → 0-25 m/s (Beaufort estimation)
+      const ms=Math.min(25,lowFreq/3.2);
+      setWind(ms);
+    },500);
+    return()=>clearInterval(interval);
+  },[enabled,analyserRef]);
+  return wind;
+}
+
+// Barometric pressure + altitude via DevicePressure or fallback
+function useBarometer(){
+  const[pressure,setPressure]=useState(null);
+  const[altitude,setAltitude]=useState(null);
+  useEffect(()=>{
+    // Try generic sensor API
+    try{
+      // @ts-ignore
+      if(typeof AbsoluteOrientationSensor!=="undefined"||typeof window.DeviceOrientationEvent!=="undefined"){
+        // Use GPS altitude as fallback
+      }
+    }catch{}
+    // GPS-derived altitude from watchPosition
+    const id=navigator.geolocation?.watchPosition(p=>{
+      if(p.coords.altitude!=null){
+        setAltitude(Math.round(p.coords.altitude));
+        // Barometric formula: P = 101325 * (1 - 2.25577e-5 * h)^5.25588
+        const h=p.coords.altitude;
+        const P=101325*Math.pow(1-2.25577e-5*h,5.25588)/100;
+        setPressure(Math.round(P));
+      }
+    },()=>{},{enableHighAccuracy:true});
+    return()=>{if(id!=null)navigator.geolocation.clearWatch(id);};
+  },[]);
+  return{pressure,altitude};
+}
+
+// Native hardware zoom via camera constraints
+function useHardwareZoom(stream){
+  const[hzoom,setHzoom]=useState(1);
+  const[maxZoom,setMaxZoom]=useState(1);
+  const[supported,setSupported]=useState(false);
+  useEffect(()=>{
+    if(!stream)return;
+    const track=stream.getVideoTracks()[0];
+    if(!track)return;
+    const caps=track.getCapabilities?.();
+    if(caps?.zoom){setSupported(true);setMaxZoom(caps.zoom.max||10);}
+  },[stream]);
+  const applyZoom=useCallback(async(val)=>{
+    if(!stream)return;
+    const track=stream.getVideoTracks()[0];
+    if(!track)return;
+    try{await track.applyConstraints({advanced:[{zoom:val}]});setHzoom(val);}catch{}
+  },[stream]);
+  return{hzoom,maxZoom,supported,applyZoom};
+}
+
 function useCameraStream(constraints,enabled=true){
   const[stream,setStream]=useState(null);
   const[error,setError]=useState(null);
@@ -555,6 +721,136 @@ function useCameraStream(constraints,enabled=true){
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// DAY VISION PROCESSING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Unsharp mask — sharpens fine detail (tactical clarity enhancement)
+function applyUnsharpMask(data,w,h,amount=1.8,radius=2){
+  const n=w*h;
+  const lum=new Float32Array(n);
+  for(let i=0;i<data.length;i+=4)
+    lum[i/4]=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+  // Separable box blur: horizontal pass then vertical pass — O(n) not O(n*r^2)
+  const tmp=new Float32Array(n);
+  const blurred=new Float32Array(n);
+  for(let y=0;y<h;y++){
+    let sum=0;
+    for(let x=-radius;x<=radius;x++) sum+=lum[y*w+Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){
+      tmp[y*w+x]=sum/(radius*2+1);
+      const add=lum[y*w+Math.min(w-1,x+radius+1)];
+      const rem=lum[y*w+Math.max(0,x-radius)];
+      sum+=add-rem;
+    }
+  }
+  for(let x=0;x<w;x++){
+    let sum=0;
+    for(let y=-radius;y<=radius;y++) sum+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
+    for(let y=0;y<h;y++){
+      blurred[y*w+x]=sum/(radius*2+1);
+      const add=tmp[Math.min(h-1,y+radius+1)*w+x];
+      const rem=tmp[Math.max(0,y-radius)*w+x];
+      sum+=add-rem;
+    }
+  }
+  for(let i=0;i<data.length;i+=4){
+    const pi=i/4;
+    const diff=lum[pi]-blurred[pi];
+    const scale=lum[pi]>0?(lum[pi]+diff*amount)/lum[pi]:1;
+    data[i]  =Math.max(0,Math.min(255,data[i]  *scale));
+    data[i+1]=Math.max(0,Math.min(255,data[i+1]*scale));
+    data[i+2]=Math.max(0,Math.min(255,data[i+2]*scale));
+  }
+}
+
+// Dark channel prior dehaze — removes atmospheric haze/glare
+function applyDehaze(data,w,h,strength=0.7){
+  // Fast approximate dark-channel: downsample to 1/4 resolution grid,
+  // patch radius reduced, then upsample transmission map
+  const step=4; // sample every 4th pixel
+  const patch=2; // small patch on downsampled grid (~8px effective)
+  const gw=Math.ceil(w/step),gh=Math.ceil(h/step);
+  const dark=new Float32Array(gw*gh);
+  for(let gy=0;gy<gh;gy++)for(let gx=0;gx<gw;gx++){
+    let minV=255;
+    for(let dy=-patch;dy<=patch;dy++)for(let dx=-patch;dx<=patch;dx++){
+      const sx=Math.min(w-1,Math.max(0,(gx+dx)*step));
+      const sy=Math.min(h-1,Math.max(0,(gy+dy)*step));
+      const i=(sy*w+sx)*4;
+      const m=Math.min(data[i],data[i+1],data[i+2]);
+      if(m<minV)minV=m;
+    }
+    dark[gy*gw+gx]=minV;
+  }
+  // Estimate atmospheric light: max of dark channel grid (approximation)
+  let A=0;
+  for(let i=0;i<dark.length;i++) if(dark[i]>A)A=dark[i];
+  A=Math.max(A,10);
+  // Apply transmission per-pixel using nearest grid sample (no expensive interpolation)
+  for(let i=0;i<data.length;i+=4){
+    const pi=i/4;
+    const x=pi%w,y=(pi-x)/w|0;
+    const gx=Math.min(gw-1,x/step|0),gy=Math.min(gh-1,y/step|0);
+    const t=Math.max(0.15,1-(strength*dark[gy*gw+gx]/A));
+    data[i]  =Math.min(255,Math.max(0,(data[i]  -A)/t+A));
+    data[i+1]=Math.min(255,Math.max(0,(data[i+1]-A)/t+A));
+    data[i+2]=Math.min(255,Math.max(0,(data[i+2]-A)/t+A));
+  }
+}
+
+// Polarize: cut specular highlights, boost saturation (polarized lens simulation)
+function applyPolarize(data,w,h){
+  for(let i=0;i<data.length;i+=4){
+    let r=data[i],g=data[i+1],b=data[i+2];
+    // Convert to HSL, boost S, reduce L on highlights
+    const max=Math.max(r,g,b)/255,min=Math.min(r,g,b)/255;
+    const l=(max+min)/2;
+    const d=max-min;
+    let s=d===0?0:d/(1-Math.abs(2*l-1));
+    // Boost saturation by 60%, crush glare (highlights above 0.85 L)
+    s=Math.min(1,s*1.6);
+    const lAdj=l>0.85?(l-0.85)*0.4+0.85*0.9:l; // compress highlights
+    // Back to RGB
+    const c=(1-Math.abs(2*lAdj-1))*s;
+    const hue=max===min?0:max===r/255?((g-b)/255/d+6)%6:max===g/255?(b-r)/255/d+2:(r-g)/255/d+4;
+    const x=c*(1-Math.abs(hue%2-1));
+    let r2=0,g2=0,b2=0;
+    if(hue<1){r2=c;g2=x;}else if(hue<2){r2=x;g2=c;}
+    else if(hue<3){g2=c;b2=x;}else if(hue<4){g2=x;b2=c;}
+    else if(hue<5){r2=x;b2=c;}else{r2=c;b2=x;}
+    const m=lAdj-c/2;
+    data[i]  =Math.min(255,Math.max(0,Math.round((r2+m)*255)));
+    data[i+1]=Math.min(255,Math.max(0,Math.round((g2+m)*255)));
+    data[i+2]=Math.min(255,Math.max(0,Math.round((b2+m)*255)));
+  }
+}
+
+// Tactical day enhancement: contrast stretch + color fidelity + HUD-safe palette
+function applyTactical(data,w,h,brightness){
+  // Auto-levels: stretch histogram per channel
+  const rMin=new Array(3).fill(255),rMax=new Array(3).fill(0);
+  for(let i=0;i<data.length;i+=4){
+    for(let c=0;c<3;c++){
+      if(data[i+c]<rMin[c])rMin[c]=data[i+c];
+      if(data[i+c]>rMax[c])rMax[c]=data[i+c];
+    }
+  }
+  // Apply levels + brightness boost + slight yellow-green tint (military CMOS filter)
+  const bBoost=1.15+brightness*0.5;
+  for(let i=0;i<data.length;i+=4){
+    const stretch=c=>{
+      const range=Math.max(1,rMax[c]-rMin[c]);
+      return Math.min(255,Math.max(0,Math.round(((data[i+c]-rMin[c])/range)*255*bBoost)));
+    };
+    data[i]  =Math.min(255,stretch(0)*0.88); // slight red reduction
+    data[i+1]=Math.min(255,stretch(1)*1.05); // slight green boost
+    data[i+2]=Math.min(255,stretch(2)*0.92); // slight blue reduction
+  }
+  // Unsharp mask for tactical clarity
+  applyUnsharpMask(data,w,h,1.4,2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MULTI-DEVICE SYNC (WebRTC signaling via BroadcastChannel + PeerJS-less peer)
 // Uses localStorage as simple signaling bus for same-device tabs
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -595,6 +891,42 @@ function useTimeline(){
 // ═══════════════════════════════════════════════════════════════════════════════
 // GPS MAP MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
+// Face detection using Canvas + heuristic skin-tone blob analysis
+// (No ML model — uses YCbCr skin tone range detection)
+function detectFaces(data,w,h){
+  const mask=new Uint8Array(w*h);
+  // YCbCr skin tone: Y>80, Cb 85-135, Cr 135-180
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2];
+    const Y=0.299*r+0.587*g+0.114*b;
+    const Cb=-0.168736*r-0.331264*g+0.5*b+128;
+    const Cr=0.5*r-0.418688*g-0.081312*b+128;
+    if(Y>80&&Cb>85&&Cb<135&&Cr>135&&Cr<180)mask[i/4]=1;
+  }
+  // Find largest connected skin blob
+  const visited=new Uint8Array(w*h);const faces=[];
+  for(let start=0;start<mask.length;start++){
+    if(!mask[start]||visited[start])continue;
+    const queue=[start];visited[start]=1;
+    let minX=w,minY=h,maxX=0,maxY=0,size=0;
+    while(queue.length){
+      const idx=queue.pop();size++;
+      const x=idx%w,y=Math.floor(idx/w);
+      if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
+      for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){
+        const nx=x+dx,ny=y+dy;
+        if(nx>=0&&nx<w&&ny>=0&&ny<h){const ni=ny*w+nx;if(mask[ni]&&!visited[ni]){visited[ni]=1;queue.push(ni);}}
+      }
+    }
+    // Face-like: roughly square, not too small/large, upper half of frame preferred
+    const bw=maxX-minX,bh=maxY-minY,aspect=bw/Math.max(1,bh);
+    const area=(bw*bh)/(w*h);
+    if(size>300&&area>0.005&&area<0.4&&aspect>0.5&&aspect<2.0)
+      faces.push({x:minX,y:minY,w:bw,h:bh,cx:(minX+maxX)/2,cy:(minY+maxY)/2});
+  }
+  return faces.sort((a,b)=>b.w*b.h-a.w*a.h).slice(0,4);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // INSTRUCTIONS MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1481,9 +1813,16 @@ function CameraPanel({stream,ready,error,label,mode,brightness,sensitivity,edgeO
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
 const MODE_META={
-  NVG:{label:"NVG",color:"#00ff50"},THERMAL:{label:"THERMAL",color:"#ff5500"},
-  RAINBOW:{label:"RAINBOW",color:"#00ccff"},FUSION:{label:"FUSION",color:"#cc44ff"},
-  BLUE:{label:"ARCTIC",color:"#0088ff"},WHITE:{label:"WHT-HOT",color:"#dddddd"},
+  RAW:    {label:"RAW",    color:"#ffffff"},
+  NVG:    {label:"NVG",    color:"#00ff50"},
+  THERMAL:{label:"THERMAL",color:"#ff5500"},
+  RAINBOW:{label:"RAINBOW",color:"#00ccff"},
+  FUSION: {label:"FUSION", color:"#cc44ff"},
+  BLUE:   {label:"ARCTIC", color:"#0088ff"},
+  WHITE:  {label:"WHT-HOT",color:"#dddddd"},
+  TACT:   {label:"TACT",   color:"#f0e060"},
+  HAZE:   {label:"DEHAZE", color:"#60d0ff"},
+  POLAR:  {label:"POLARIZ",color:"#ff60d0"},
 };
 const MODE_KEYS=Object.keys(MODE_META);
 const ZOOM_STEPS=[1,1.5,2,3,4,6,8,12];
@@ -1509,9 +1848,16 @@ function NightVisionCamera(){
   const[showRPPG,setShowRPPG]=useState(false);
   const[audioEnabled,setAudioEnabled]=useState(false);
   const[multiSync,setMultiSync]=useState(false);
-  const[modal,setModal]=useState(null); // "map"|"timeline"|"tripwire"|"gallery"|"manual"
+  const[modal,setModal]=useState(null);
   const[rppgSample,setRppgSample]=useState(0);
+  const[faceDetect,setFaceDetect]=useState(false);
+  const[faces,setFaces]=useState([]);
+  const[shakeEnabled,setShakeEnabled]=useState(false);
+  const[hardZoom,setHardZoom]=useState(false);
+  const[burstMode,setBurstMode]=useState(false);
+  const[qrResult,setQrResult]=useState(null);
   const mediaRecRef=useRef(null);
+  const micAnalyserRef=useRef(null);
 
   const clock=useClock();
   const heading=useDeviceOrientation();
@@ -1520,9 +1866,14 @@ function NightVisionCamera(){
   const hr=useRPPG(showRPPG?rppgSample:null);
   const{peers,alerts:syncAlerts,broadcast}=useMultiSync(multiSync,PEER_ID);
   const{events,add:addEvent}=useTimeline();
+  const{torchOn,toggle:toggleTorch}=useTorch();
+  const{shakeCount,impact:shakeImpact}=useShake(shakeEnabled);
+  const wind=useWindSpeed(audioEnabled,micAnalyserRef);
+  const{pressure,altitude}=useBarometer();
 
   const rear=useCameraStream({facingMode:"environment"},true);
   const front=useCameraStream({facingMode:"user"},dualMode);
+  const{hzoom,maxZoom,supported:hzoomSupported,applyZoom}=useHardwareZoom(hardZoom?rear.stream:null);
 
   const color=MODE_META[mode].color;
   const timeStr=clock.toLocaleTimeString("en-US",{hour12:false});
@@ -1575,6 +1926,70 @@ function NightVisionCamera(){
     if(c)handleCapture(c.toDataURL("image/png"),"REAR",0,false);
   };
 
+  const burstSnap=useCallback(()=>{
+    const c=document.querySelector("canvas[data-primary='true']");
+    if(!c)return;
+    let i=0;
+    const shoot=()=>{
+      if(i>=5)return;
+      handleCapture(c.toDataURL("image/png"),`BURST-${i+1}`,0,false);
+      i++;setTimeout(shoot,300);
+    };
+    shoot();
+  },[handleCapture]);
+
+  const exportPDF=useCallback(()=>{
+    const lines=[];
+    const now=new Date();
+    lines.push(`NVS-7.5 SESSION REPORT`);
+    lines.push(`Generated: ${now.toLocaleString()}`);
+    lines.push(`Mode: ${mode} | Zoom: ${zoom}x | Sensitivity: ${Math.round(sensitivity*100)}%`);
+    if(gps)lines.push(`GPS: ${gps.lat.toFixed(5)}°N ${gps.lon.toFixed(5)}°W ±${gps.acc?.toFixed(0)}m`);
+    if(altitude!=null)lines.push(`Altitude: ${altitude}m`);
+    if(pressure!=null)lines.push(`Pressure: ${pressure}hPa`);
+    lines.push(`\nEVENT LOG (${events.length} events):`);
+    events.slice(0,100).forEach((e,i)=>{
+      const t=new Date(e.ts).toLocaleTimeString("en-US",{hour12:false});
+      lines.push(`  [${t}] ${e.type.toUpperCase()}: ${e.data?.label||""}`);
+    });
+    lines.push(`\nCAPTURES: ${captures.length} images`);
+    captures.slice(0,20).forEach((c,i)=>{
+      lines.push(`  [${c.time}] ${c.label} ${c.auto?"[AUTO]":"[SNAP]"}${c.targets>0?` — ${c.targets} targets`:""}`);
+    });
+    lines.push(`\nTRIPWIRES: ${tripwires.length} zones`);
+    tripwires.forEach(tw=>lines.push(`  ${tw.label}: ${tw.points.length} points`));
+    lines.push(`\n— CLOUDYGETTY-AI // ENTROPY-ZERO // NVS-7.5 // CLASSIFIED —`);
+
+    // Build simple text-based PDF using data URI
+    const text=lines.join("\n");
+    const blob=new Blob([text],{type:"text/plain"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=`nvs7-report-${now.getTime()}.txt`;a.click();
+    addEvent("export",{label:`Session report exported — ${events.length} events, ${captures.length} captures`});
+  },[mode,zoom,sensitivity,gps,altitude,pressure,events,captures,tripwires,addEvent]);
+
+  // Shake → burst capture
+  useEffect(()=>{
+    if(shakeImpact&&burstMode)burstSnap();
+  },[shakeImpact,burstMode,burstSnap]);
+
+  // QR scan via BarcodeDetector API
+  const scanQR=useCallback(async()=>{
+    if(!("BarcodeDetector" in window)){setQrResult("BarcodeDetector not supported on this browser");return;}
+    const c=document.querySelector("canvas[data-primary='true']");
+    if(!c)return;
+    try{
+      // @ts-ignore
+      const detector=new BarcodeDetector({formats:["qr_code","code_128","ean_13","data_matrix"]});
+      const barcodes=await detector.detect(c);
+      if(barcodes.length>0){
+        setQrResult(barcodes[0].rawValue);
+        addEvent("qr",{label:`QR: ${barcodes[0].rawValue.slice(0,40)}`});
+      } else setQrResult("NO CODE DETECTED");
+    }catch(e){setQrResult("SCAN FAILED: "+e.message);}
+  },[addEvent]);
+
   const toggleRecord=()=>{
     const c=document.querySelector("canvas[data-primary='true']");
     if(!c)return;
@@ -1594,7 +2009,7 @@ function NightVisionCamera(){
 
   return(
     <div style={{height:"100dvh",background:"#000",display:"flex",flexDirection:"column",fontFamily:"'DM Mono',monospace",overflow:"hidden"}}>
-      <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+      {/* fonts loaded in head */}
       <style>{`
         @keyframes nvg-scan{0%{top:-3px;opacity:0}5%{opacity:.9}95%{opacity:.5}100%{top:100%;opacity:0}}
         @keyframes rec-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
@@ -1630,6 +2045,8 @@ function NightVisionCamera(){
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
             {heading!==null&&<span style={{fontSize:7,color:`${color}55`,letterSpacing:1}}>{String(heading).padStart(3,"0")}° {compassDir}</span>}
             {gps&&<span style={{fontSize:6,color:`${color}40`,letterSpacing:.5}}>{gps.lat.toFixed(3)}°N</span>}
+            {altitude!=null&&<span style={{fontSize:6,color:`${color}35`,letterSpacing:.5}}>{altitude}m ASL</span>}
+            {wind>1&&<span style={{fontSize:6,color:`${color}35`,letterSpacing:.5}}>💨{wind.toFixed(1)}m/s</span>}
             <div style={{display:"flex",gap:4,alignItems:"center"}}>
               <SignalBars level={.8} color={color}/>
               {autoCapture&&<span style={{fontSize:6,color:"#ffdd00",animation:"rec-blink 1.5s step-end infinite"}}>AUTO</span>}
@@ -1669,109 +2086,234 @@ function NightVisionCamera(){
         )}
 
         {/* CONTROLS */}
-        <div style={{padding:"10px 12px",borderTop:`1px solid ${color}10`,display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{
+          padding:"12px 12px 10px",
+          borderTop:`1px solid ${color}18`,
+          display:"flex",flexDirection:"column",gap:10,
+          background:"rgba(0,0,0,0.85)",
+        }}>
 
-          {/* MODE */}
-          <div style={{display:"flex",gap:4}}>
-            {MODE_KEYS.map(m=>{const mc=MODE_META[m].color;return(
-              <button key={m} onClick={()=>setMode(m)} style={{flex:1,padding:"5px 1px",
-                background:mode===m?`${mc}12`:"transparent",border:`1px solid ${mode===m?mc:`${mc}18`}`,
-                borderRadius:2,fontSize:6,color:mode===m?mc:`${mc}38`,letterSpacing:.5,transition:"all 0.12s"}}>
-                {MODE_META[m].label}
+          {/* ── MODE SELECTOR ── */}
+          <div style={{display:"flex",gap:5}}>
+            {MODE_KEYS.map(m=>{
+              const mc=MODE_META[m].color;
+              return(
+                <button key={m} onClick={()=>setMode(m)} style={{
+                  flex:1,padding:"9px 2px",
+                  background:mode===m?`${mc}20`:"rgba(0,0,0,0.4)",
+                  border:`1.5px solid ${mode===m?mc:`${mc}28`}`,
+                  borderRadius:6,fontSize:8,fontWeight:700,
+                  color:mode===m?mc:`${mc}55`,
+                  letterSpacing:.5,transition:"all 0.15s",
+                  boxShadow:mode===m?`0 0 8px ${mc}30`:"none",
+                }}>
+                  {MODE_META[m].label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── ZOOM ── */}
+          <div>
+            <div style={{fontSize:9,color:`${color}60`,letterSpacing:2,marginBottom:5}}>ZOOM</div>
+            <div style={{display:"flex",gap:5}}>
+              {ZOOM_STEPS.map(z=>(
+                <button key={z} onClick={()=>setZoom(z)} style={{
+                  flex:1,padding:"10px 2px",
+                  background:zoom===z?`${color}18`:"rgba(0,0,0,0.4)",
+                  border:`1.5px solid ${zoom===z?color:`${color}20`}`,
+                  borderRadius:6,fontSize:9,fontWeight:700,
+                  color:zoom===z?color:`${color}45`,
+                  transition:"all 0.12s",
+                  boxShadow:zoom===z?`0 0 6px ${color}25`:"none",
+                }}>
+                  {z}×
+                </button>
+              ))}
+            </div>
+            {hardZoom&&hzoomSupported&&(
+              <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8}}>
+                <span style={{fontSize:9,color:`${color}60`,letterSpacing:1,whiteSpace:"nowrap"}}>HW ZOOM</span>
+                <input type="range" min="1" max={maxZoom} step="0.1" value={hzoom}
+                  onChange={e=>applyZoom(parseFloat(e.target.value))}
+                  style={{flex:1,accentColor:color,height:4}}/>
+                <span style={{fontSize:9,color:color,minWidth:34,fontWeight:700}}>{hzoom.toFixed(1)}×</span>
+              </div>
+            )}
+          </div>
+
+          {/* ── SLIDERS ── */}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:9,color:`${color}60`,letterSpacing:1,minWidth:36}}>SENS</span>
+              <input type="range" min="0" max="1" step="0.05" value={sensitivity}
+                onChange={e=>setSensitivity(parseFloat(e.target.value))}
+                style={{flex:1,accentColor:color,height:4}}/>
+              <span style={{fontSize:9,color:color,minWidth:32,fontWeight:700,textAlign:"right"}}>{Math.round(sensitivity*100)}%</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:9,color:`${color}60`,letterSpacing:1,minWidth:36}}>GAIN</span>
+              <div style={{flex:1,display:"flex",gap:4,alignItems:"flex-end",height:22}}>
+                {[-2,-1,0,1,2].map((v,i)=>(
+                  <div key={i} onClick={()=>setBrightness(v*0.75)} style={{
+                    flex:1,height:10+i*3,borderRadius:2,cursor:"pointer",
+                    background:brightness>=v*0.75?color:`${color}20`,
+                    transition:"background 0.1s",
+                    boxShadow:brightness>=v*0.75?`0 0 4px ${color}50`:"none",
+                  }}/>
+                ))}
+              </div>
+              <span style={{fontSize:9,color:color,minWidth:32,fontWeight:700,textAlign:"right"}}>
+                {brightness>0?"+":""}{(brightness).toFixed(1)}
+              </span>
+            </div>
+          </div>
+
+          {/* ── FEATURE TOGGLES ── */}
+          <div>
+            <div style={{fontSize:9,color:`${color}50`,letterSpacing:2,marginBottom:6}}>FEATURES</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
+              {[
+                {l:"EDGE",v:edgeOverlay,f:()=>setEdgeOverlay(e=>!e)},
+                {l:"NR",v:noiseReduction,f:()=>setNoiseReduction(n=>!n)},
+                {l:"MOTION",v:motionEnabled,f:()=>setMotionEnabled(m=>!m)},
+                {l:"DUAL",v:dualMode,f:()=>setDualMode(d=>!d)},
+                {l:"RETICLE",v:showReticle,f:()=>setShowReticle(r=>!r)},
+                {l:"FACE",v:faceDetect,f:()=>setFaceDetect(fd=>!fd)},
+                {l:"rPPG HR",v:showRPPG,f:()=>setShowRPPG(r=>!r)},
+                {l:"MIC",v:audioEnabled,f:()=>setAudioEnabled(a=>!a)},
+                {l:"🔦 TORCH",v:torchOn,f:toggleTorch,c:"#ffdd88"},
+                {l:"SHAKE",v:shakeEnabled,f:()=>setShakeEnabled(s=>!s),c:"#ff8844"},
+                {l:"HW ZOOM",v:hardZoom,f:()=>setHardZoom(h=>!h),c:"#44ffcc"},
+                {l:"SYNC",v:multiSync,f:()=>setMultiSync(s=>!s),c:"#cc44ff"},
+              ].map(({l,v,f,c})=>(
+                <button key={l} onClick={f} style={{
+                  padding:"10px 4px",
+                  background:v?`${c||color}18`:"rgba(0,0,0,0.35)",
+                  border:`1.5px solid ${v?(c||color):`${c||color}22`}`,
+                  borderRadius:7,fontSize:8,fontWeight:v?700:400,
+                  color:v?(c||color):`${c||color}45`,
+                  letterSpacing:.3,transition:"all 0.12s",
+                  boxShadow:v?`0 0 6px ${c||color}25`:"none",
+                  lineHeight:1.2,
+                }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── CAPTURE ACTIONS ── */}
+          <div>
+            <div style={{fontSize:9,color:`${color}50`,letterSpacing:2,marginBottom:6}}>CAPTURE</div>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:5}}>
+              <button onClick={()=>setAutoCapture(a=>!a)} style={{
+                padding:"12px 6px",
+                background:autoCapture?"rgba(255,221,0,0.15)":"rgba(0,0,0,0.35)",
+                border:`1.5px solid ${autoCapture?"#ffdd00":"rgba(255,221,0,0.25)"}`,
+                borderRadius:7,fontSize:9,fontWeight:700,
+                color:autoCapture?"#ffdd00":"rgba(255,221,0,0.45)",
+                boxShadow:autoCapture?"0 0 8px rgba(255,221,0,0.2)":"none",
+                transition:"all 0.12s",
+              }}>
+                🎯 AUTO {autoCapture?"ON":"OFF"}
               </button>
-            );})}
-          </div>
-
-          {/* ZOOM */}
-          <div style={{display:"flex",gap:3}}>
-            {ZOOM_STEPS.map(z=>(
-              <button key={z} onClick={()=>setZoom(z)} style={{flex:1,padding:"4px 1px",
-                background:zoom===z?`${color}10`:"transparent",border:`1px solid ${zoom===z?color:`${color}12`}`,
-                borderRadius:2,fontSize:6,color:zoom===z?color:`${color}32`,transition:"all 0.1s"}}>
-                {z}×
+              <button onClick={manualSnap} style={{
+                padding:"12px 4px",background:"rgba(0,0,0,0.35)",
+                border:`1.5px solid ${color}30`,borderRadius:7,
+                fontSize:14,color,
+              }}>📷</button>
+              <button onClick={burstSnap} style={{
+                padding:"12px 4px",
+                background:burstMode?"rgba(255,68,170,0.15)":"rgba(0,0,0,0.35)",
+                border:"1.5px solid rgba(255,68,170,0.35)",
+                borderRadius:7,fontSize:9,fontWeight:700,
+                color:"rgba(255,68,170,0.8)",
+              }}>×5</button>
+              <button onClick={toggleRecord} style={{
+                padding:"12px 4px",
+                background:recording?"rgba(255,34,34,0.15)":"rgba(0,0,0,0.35)",
+                border:`1.5px solid ${recording?"#ff2222":"rgba(255,34,34,0.25)"}`,
+                borderRadius:7,fontSize:9,fontWeight:700,
+                color:recording?"#ff2222":"rgba(255,34,34,0.45)",
+                boxShadow:recording?"0 0 8px rgba(255,34,34,0.2)":"none",
+              }}>
+                {recording?"■ STOP":"● REC"}
               </button>
-            ))}
+            </div>
           </div>
 
-          {/* SENS + GAIN */}
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <span style={{fontSize:6,color:`${color}45`,letterSpacing:1,whiteSpace:"nowrap"}}>SENS</span>
-            <input type="range" min="0" max="1" step="0.05" value={sensitivity}
-              onChange={e=>setSensitivity(parseFloat(e.target.value))}
-              style={{flex:1,accentColor:color}}/>
-            <span style={{fontSize:6,color:`${color}60`,minWidth:22}}>{Math.round(sensitivity*100)}%</span>
-            <span style={{fontSize:6,color:`${color}45`,letterSpacing:1,whiteSpace:"nowrap"}}>GAIN</span>
-            {[-2,-1,0,1,2].map((v,i)=>(
-              <div key={i} onClick={()=>setBrightness(v*0.75)} style={{width:6,height:8+i*2,borderRadius:1,cursor:"pointer",
-                background:brightness>=v*0.75?color:`${color}18`,transition:"background 0.1s"}}/>
-            ))}
+          {/* ── TOOLS ── */}
+          <div>
+            <div style={{fontSize:9,color:`${color}50`,letterSpacing:2,marginBottom:6}}>TOOLS</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
+              {[
+                {l:"📁 Gallery",m:"gallery",c:newCapCount>0?color:undefined,badge:newCapCount>0?newCapCount:null},
+                {l:"🗺 Map",m:"map",c:"#00ccff"},
+                {l:"⏱ Log",m:"timeline",c:"#cc44ff",badge:newEventCount>0?newEventCount:null},
+                {l:"⚡ Tripwire",m:"tripwire",c:hasTripwire?"#ffcc00":"#ffcc0080"},
+                {l:"📷 QR Scan",m:"qrscan",c:"#44ffc8"},
+                {l:"📄 Report",m:"report",c:"#b464ff"},
+                {l:"📊 Sensors",m:"sensors",c:"#44ffcc"},
+                {l:"? Manual",m:"manual",c:`${color}80`},
+              ].map(({l,m,c,badge})=>(
+                <button key={m} onClick={()=>{
+                  if(m==="qrscan"){scanQR();return;}
+                  if(m==="report"){exportPDF();return;}
+                  setModal(m);
+                }} style={{
+                  padding:"11px 4px",
+                  background:modal===m?`${c||color}15`:"rgba(0,0,0,0.35)",
+                  border:`1.5px solid ${c||color}${modal===m?"":"30"}`,
+                  borderRadius:7,fontSize:9,fontWeight:500,
+                  color:c||`${color}60`,
+                  letterSpacing:.2,transition:"all 0.12s",
+                  position:"relative",
+                }}>
+                  {l}
+                  {badge&&<span style={{
+                    position:"absolute",top:3,right:4,
+                    background:c||color,color:"#000",
+                    fontSize:6,fontWeight:700,borderRadius:8,
+                    padding:"1px 4px",lineHeight:1.2,
+                  }}>{badge}</span>}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* TOGGLE ROW 1 */}
-          <div style={{display:"flex",gap:4}}>
-            {[
-              {l:"EDGE",v:edgeOverlay,f:()=>setEdgeOverlay(e=>!e)},
-              {l:"NR",v:noiseReduction,f:()=>setNoiseReduction(n=>!n)},
-              {l:"MOT",v:motionEnabled,f:()=>setMotionEnabled(m=>!m)},
-              {l:"DUAL",v:dualMode,f:()=>setDualMode(d=>!d)},
-              {l:"⊕",v:showReticle,f:()=>setShowReticle(r=>!r),big:true},
-              {l:"rPPG",v:showRPPG,f:()=>setShowRPPG(r=>!r)},
-              {l:"🎙",v:audioEnabled,f:()=>setAudioEnabled(a=>!a),big:true},
-              {l:"SYNC",v:multiSync,f:()=>setMultiSync(s=>!s)},
-            ].map(({l,v,f,big})=>(
-              <button key={l} onClick={f} style={{flex:1,padding:"5px 1px",
-                background:v?`${color}10`:"transparent",border:`1px solid ${v?color:`${color}15`}`,
-                borderRadius:2,fontSize:big?10:6,letterSpacing:.3,color:v?color:`${color}30`,transition:"all 0.12s"}}>
-                {l}
-              </button>
-            ))}
-          </div>
-
-          {/* ACTION ROW */}
-          <div style={{display:"flex",gap:4}}>
-            <button onClick={()=>setAutoCapture(a=>!a)} style={{flex:2,padding:"7px 4px",
-              background:autoCapture?"rgba(255,221,0,0.10)":"transparent",
-              border:`1px solid ${autoCapture?"#ffdd00":"rgba(255,221,0,0.18)"}`,
-              borderRadius:2,fontSize:7,letterSpacing:1,color:autoCapture?"#ffdd00":"rgba(255,221,0,0.35)",transition:"all 0.12s"}}>
-              🎯 AUTO {autoCapture?"ON":"OFF"}
-            </button>
-            <button onClick={manualSnap} style={{flex:1,padding:"7px 4px",background:"transparent",
-              border:`1px solid ${color}18`,borderRadius:2,fontSize:7,color:`${color}55`}}>📷</button>
-            <button onClick={toggleRecord} style={{flex:1,padding:"7px 4px",
-              background:recording?"rgba(255,34,34,0.10)":"transparent",
-              border:`1px solid ${recording?"#ff2222":"rgba(255,34,34,0.18)"}`,
-              borderRadius:2,fontSize:7,color:recording?"#ff2222":"rgba(255,34,34,0.35)"}}>
-              {recording?"■":"●"}REC
-            </button>
-          </div>
-
-          {/* MODAL ROW */}
-          <div style={{display:"flex",gap:4}}>
-            {[
-              {l:`📁 ${newCapCount>0?`(${newCapCount})`:"GAL"}`,m:"gallery",c:newCapCount>0?color:undefined},
-              {l:"🗺 MAP",m:"map",c:gps?"#00ccff":undefined},
-              {l:`⏱ ${newEventCount>0?`(${newEventCount})`:"LOG"}`,m:"timeline",c:newEventCount>0?"#cc44ff":undefined},
-              {l:`⚡ WIRE${tripwires.length?` (${tripwires.length})`:""}`,m:"tripwire",c:hasTripwire?"#ffcc00":tripwires.length>0?"#ffcc0080":undefined},
-              {l:"? HELP",m:"manual",c:undefined},
-            ].map(({l,m,c})=>(
-              <button key={m} onClick={()=>setModal(m)} style={{flex:1,padding:"6px 2px",
-                background:modal===m?`${c||color}10`:"transparent",
-                border:`1px solid ${c||color}${modal===m?"":"25"}`,
-                borderRadius:2,fontSize:7,color:c||`${color}45`,letterSpacing:.3,transition:"all 0.12s"}}>
-                {l}
-              </button>
-            ))}
-          </div>
+          {/* QR result */}
+          {qrResult&&(
+            <div style={{
+              padding:"10px 12px",
+              background:"rgba(68,255,200,0.06)",
+              border:"1px solid rgba(68,255,200,0.3)",
+              borderRadius:7,display:"flex",alignItems:"center",gap:8,
+            }}>
+              <span style={{fontSize:9,color:"rgba(68,255,200,0.6)",letterSpacing:1,flexShrink:0}}>QR:</span>
+              <span style={{fontSize:9,color:"rgba(68,255,200,0.95)",flex:1,
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{qrResult}</span>
+              <button onClick={()=>setQrResult(null)} style={{
+                background:"transparent",border:"1px solid rgba(68,255,200,0.3)",
+                color:"rgba(68,255,200,0.6)",fontSize:9,cursor:"pointer",
+                borderRadius:4,padding:"2px 8px",
+              }}>✕</button>
+            </div>
+          )}
 
           {/* PEER STATUS */}
           {multiSync&&(
-            <div style={{padding:"5px 8px",border:`1px solid #cc44ff25`,borderRadius:2,background:"rgba(204,68,255,0.04)"}}>
+            <div style={{
+              padding:"8px 12px",
+              border:"1px solid rgba(204,68,255,0.2)",
+              borderRadius:7,background:"rgba(204,68,255,0.05)",
+            }}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:7,color:"#cc44ff",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>SYNC — ID:{PEER_ID.slice(-4)}</span>
-                <span style={{fontSize:6,color:"rgba(204,68,255,0.6)",letterSpacing:1}}>{peers.length} PEER{peers.length!==1?"S":""}</span>
+                <span style={{fontSize:9,color:"#cc44ff",letterSpacing:1}}>SYNC — ID:{PEER_ID.slice(-4)}</span>
+                <span style={{fontSize:8,color:"rgba(204,68,255,0.6)"}}>{peers.length} PEER{peers.length!==1?"S":""}</span>
               </div>
               {syncAlerts.slice(0,2).map((a,i)=>(
-                <div key={i} style={{fontSize:6,color:"rgba(204,68,255,0.7)",marginTop:2,letterSpacing:.5}}>
+                <div key={i} style={{fontSize:8,color:"rgba(204,68,255,0.7)",marginTop:3}}>
                   ↳ {a.from.slice(-4)}: {a.payload?.label||"ALERT"}
                 </div>
               ))}
@@ -1785,6 +2327,44 @@ function NightVisionCamera(){
           <span style={{fontSize:6,color:`${color}18`,letterSpacing:1}}>NVS-7.5 // CLASSIFIED</span>
         </div>
       </div>
+
+      {/* Sensors modal */}
+      {modal==="sensors"&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:200,
+          display:"flex",flexDirection:"column",animation:"fade-in 0.2s ease"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"10px 14px",borderBottom:`1px solid ${color}15`,flexShrink:0}}>
+            <span style={{fontFamily:"'Cinzel',serif",fontSize:10,fontWeight:900,color,letterSpacing:4}}>SYSTEM SENSORS</span>
+            <button onClick={()=>setModal(null)} style={{padding:"4px 10px",background:"transparent",
+              border:`1px solid ${color}30`,borderRadius:2,color:`${color}70`,
+              fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:2,cursor:"pointer"}}>CLOSE</button>
+          </div>
+          <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:8,overflowY:"auto"}}>
+            {[
+              {l:"GPS LAT",v:gps?`${gps.lat.toFixed(6)}°N`:"--",c:"#00ccff"},
+              {l:"GPS LON",v:gps?`${gps.lon.toFixed(6)}°W`:"--",c:"#00ccff"},
+              {l:"GPS ACC",v:gps?`±${gps.acc?.toFixed(0)}m`:"--",c:"#00ccff"},
+              {l:"ALTITUDE",v:altitude!=null?`${altitude}m ASL`:"GPS acquiring",c:"#44ffcc"},
+              {l:"PRESSURE",v:pressure!=null?`${pressure} hPa`:"GPS acquiring",c:"#44ffcc"},
+              {l:"COMPASS",v:heading!=null?`${heading}° ${compassDir}`:"--",c:"#ffcc44"},
+              {l:"WIND EST",v:audioEnabled?`${wind.toFixed(1)} m/s`:"Enable mic",c:"#88ccff"},
+              {l:"rPPG HR",v:hr?`${hr} BPM`:"Enable rPPG",c:"#ff6688"},
+              {l:"TORCH",v:torchOn?"ON":"OFF",c:"#ffdd88"},
+              {l:"HW ZOOM",v:hardZoom&&hzoomSupported?`${hzoom.toFixed(1)}× / ${maxZoom}× max`:"CSS only",c:"#44ffcc"},
+              {l:"SHAKE",v:`${shakeCount} events`,c:"#ff8844"},
+              {l:"CAPTURES",v:`${captures.length}`,c:color},
+              {l:"EVENTS",v:`${events.length}`,c:color},
+              {l:"TRIPWIRES",v:`${tripwires.length}`,c:"#ffcc00"},
+            ].map(({l,v,c})=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",border:`1px solid ${c}15`,borderRadius:2,background:`${c}05`}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:`${c}70`,letterSpacing:2}}>{l}</span>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:c,letterSpacing:1}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Gallery modal inline */}
       {modal==="gallery"&&(
