@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0B0810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>SUSURRUS — Whisper Detection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0B0810;
+  --panel:#16111F;
+  --panel2:#1D1628;
+  --brass:#C9A84C;
+  --brass-dim:#8A7434;
+  --ember:#D4543A;
+  --veil:#8B5CF6;
+  --parchment:#EFE6D8;
+  --parchment-dim:#9A8F7C;
+  --line:rgba(201,168,76,.28);
+  --line-soft:rgba(201,168,76,.12);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(139,92,246,.08), transparent 60%),
+    radial-gradient(900px 500px at 50% 110%, rgba(201,168,76,.06), transparent 60%),
+    repeating-linear-gradient(93deg, rgba(255,255,255,.012) 0 2px, transparent 2px 7px),
+    var(--void);
+  color:var(--parchment);
+  font-family:'DM Mono',monospace;
+  font-weight:300;
+  min-height:100dvh;
+  display:flex;flex-direction:column;align-items:center;
+  padding:14px 14px calc(14px + env(safe-area-inset-bottom));
+  overflow-x:hidden;
+}
+body.flash::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:radial-gradient(circle at 50% 45%, rgba(212,84,58,.35), rgba(212,84,58,.08) 60%, transparent);
+  animation:flashfade .9s ease-out forwards;
+}
+@keyframes flashfade{from{opacity:1}to{opacity:0}}
+.shell{width:100%;max-width:520px;display:flex;flex-direction:column;gap:12px}
+
+/* ── ornate frame primitive ─────────────────────────── */
+.frame{
+  position:relative;
+  background:linear-gradient(180deg, var(--panel2), var(--panel));
+  border:1px solid var(--line);
+  padding:14px;
+}
+.frame::before{
+  content:'';position:absolute;inset:4px;pointer-events:none;
+  border:1px solid var(--line-soft);
+}
+.frame .corner{position:absolute;width:11px;height:11px;pointer-events:none}
+.frame .corner::before,.frame .corner::after{content:'';position:absolute;background:var(--brass)}
+.frame .corner::before{width:11px;height:1px}
+.frame .corner::after{width:1px;height:11px}
+.c-tl{top:-1px;left:-1px}.c-tl::before{top:0;left:0}.c-tl::after{top:0;left:0}
+.c-tr{top:-1px;right:-1px}.c-tr::before{top:0;right:0}.c-tr::after{top:0;right:0}
+.c-bl{bottom:-1px;left:-1px}.c-bl::before{bottom:0;left:0}.c-bl::after{bottom:0;left:0}
+.c-br{bottom:-1px;right:-1px}.c-br::before{bottom:0;right:0}.c-br::after{bottom:0;right:0}
+
+/* ── header ─────────────────────────────────────────── */
+header{text-align:center;padding:10px 0 2px}
+h1{
+  font-family:'Cinzel',serif;font-weight:900;font-size:clamp(30px,9vw,42px);
+  letter-spacing:.22em;margin-left:.22em;
+  color:var(--brass);
+  text-shadow:0 0 24px rgba(201,168,76,.35), 0 2px 0 rgba(0,0,0,.6);
+}
+.subtitle{
+  font-size:10px;letter-spacing:.42em;margin-left:.42em;color:var(--parchment-dim);
+  text-transform:uppercase;margin-top:4px;
+}
+.rule{
+  display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--brass-dim);
+}
+.rule::before,.rule::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--line))}
+.rule::after{background:linear-gradient(90deg,var(--line),transparent)}
+.rule span{font-size:9px;letter-spacing:.3em}
+
+/* ── sigil ──────────────────────────────────────────── */
+.sigil-wrap{display:flex;flex-direction:column;align-items:center;padding:16px 14px}
+#sigil{width:min(78vw,320px);height:min(78vw,320px);display:block}
+.verdict{
+  font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:.34em;margin-left:.34em;
+  margin-top:12px;text-transform:uppercase;transition:color .3s;
+  color:var(--parchment-dim);
+}
+.verdict.armed{color:var(--brass)}
+.verdict.candidate{color:var(--veil)}
+.verdict.detected{color:var(--ember);text-shadow:0 0 18px rgba(212,84,58,.5);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.65}}
+.conf-track{width:100%;height:4px;background:rgba(255,255,255,.06);margin-top:12px;position:relative}
+.conf-track::after{
+  content:'';position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--brass-dim);
+  left:var(--thresh,60%);
+}
+#confBar{height:100%;width:0%;background:linear-gradient(90deg,var(--brass),var(--ember));transition:width .12s linear}
+
+/* ── readouts ───────────────────────────────────────── */
+.readouts{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line-soft);border:1px solid var(--line-soft)}
+.cell{background:var(--panel);padding:9px 6px;text-align:center}
+.cell .k{font-size:8px;letter-spacing:.28em;color:var(--parchment-dim);text-transform:uppercase}
+.cell .v{font-size:15px;font-weight:500;color:var(--parchment);margin-top:3px;font-variant-numeric:tabular-nums}
+.cell .v.hot{color:var(--brass)}
+
+/* ── controls ───────────────────────────────────────── */
+.controls{display:flex;flex-direction:column;gap:14px}
+#armBtn{
+  font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:.3em;text-transform:uppercase;
+  padding:15px;width:100%;cursor:pointer;
+  color:var(--void);background:linear-gradient(180deg,#DEC06A,var(--brass) 50%,#A5883A);
+  border:1px solid #E8D08A;
+  box-shadow:0 0 20px rgba(201,168,76,.25), inset 0 1px 0 rgba(255,255,255,.35);
+  transition:filter .2s, transform .05s;
+}
+#armBtn:active{transform:translateY(1px)}
+#armBtn.armed{
+  color:var(--parchment);background:linear-gradient(180deg,#2A2138,var(--panel));
+  border:1px solid var(--line);box-shadow:none;
+}
+.ctl-row{display:flex;align-items:center;gap:12px}
+.ctl-row label{font-size:9px;letter-spacing:.24em;color:var(--parchment-dim);text-transform:uppercase;width:92px;flex:none}
+.ctl-row output{font-size:11px;color:var(--brass);width:44px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
+input[type=range]{
+  flex:1;appearance:none;-webkit-appearance:none;height:2px;background:var(--line);outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;background:var(--void);
+  border:2px solid var(--brass);transform:rotate(45deg);cursor:pointer;
+}
+.toggles{display:flex;gap:8px}
+.tog{
+  flex:1;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  padding:9px 4px;text-align:center;cursor:pointer;user-select:none;
+  color:var(--parchment-dim);border:1px solid var(--line-soft);background:transparent;transition:all .2s;
+}
+.tog.on{color:var(--brass);border-color:var(--brass-dim);background:rgba(201,168,76,.07)}
+
+/* ── log ────────────────────────────────────────────── */
+.log-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+.log-head h2{font-family:'Cinzel',serif;font-size:12px;letter-spacing:.3em;color:var(--brass);font-weight:700}
+#clearLog{background:none;border:none;color:var(--parchment-dim);font-family:inherit;font-size:9px;letter-spacing:.2em;cursor:pointer;text-transform:uppercase}
+#log{list-style:none;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:5px}
+#log:empty::after{
+  content:'No whispers recorded. The ward listens.';
+  font-size:10px;font-style:italic;color:var(--parchment-dim);letter-spacing:.06em;
+  display:block;padding:8px 0;
+}
+#log li{
+  display:flex;justify-content:space-between;gap:8px;font-size:10px;padding:7px 9px;
+  border-left:2px solid var(--ember);background:rgba(212,84,58,.06);
+  font-variant-numeric:tabular-nums;animation:slidein .3s ease-out;
+}
+@keyframes slidein{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+#log .t{color:var(--parchment)}
+#log .d{color:var(--parchment-dim)}
+#log .c{color:var(--ember)}
+
+/* ── telemetry ──────────────────────────────────────── */
+.telemetry{
+  display:flex;justify-content:space-between;font-size:8px;letter-spacing:.18em;
+  color:var(--parchment-dim);text-transform:uppercase;padding:2px 4px;font-variant-numeric:tabular-nums;
+}
+.telemetry b{color:var(--brass-dim);font-weight:400}
+.err{color:var(--ember);font-size:10px;text-align:center;padding:4px;display:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <h1>SUSURRUS</h1>
+    <div class="subtitle">Auditory Ward · Whisper Detection</div>
+    <div class="rule"><span>v1.0 · cloudygetty-ai</span></div>
+  </header>
+
+  <section class="frame sigil-wrap">
+    <i class="corner c-tl"></i><i class="corner c-tr"></i><i class="corner c-bl"></i><i class="corner c-br"></i>
+    <canvas id="sigil"></canvas>
+    <div class="verdict" id="verdict">Dormant</div>
+    <div class="conf-track" id="confTrack"><div id="confBar"></div></div>
+  </section>
+
+  <section class="readouts" id="readouts">
+    <div class="cell"><div class="k">Level</div><div class="v" id="rLvl">—</div></div>
+    <div class="cell"><div class="k">Floor</div><div class="v" id="rFlr">—</div></div>
+    <div class="cell"><div class="k">Score</div><div class="v" id="rScr">—</div></div>
+    <div class="cell"><div class="k">Unvoiced</div><div class="v" id="rHrm">—</div></div>
+    <div class="cell"><div class="k">Band</div><div class="v" id="rBnd">—</div></div>
+    <div class="cell"><div class="k">Syllabic</div><div class="v" id="rMod">—</div></div>
+  </section>
+
+  <section class="frame controls">
+    <i class="corner c-tl"></i><i class="corner c-tr"></i><i class="corner c-bl"></i><i class="corner c-br"></i>
+    <button id="armBtn">Arm the Ward</button>
+    <div class="err" id="err"></div>
+    <div class="ctl-row">
+      <label for="sens">Sensitivity</label>
+      <input type="range" id="sens" min="0" max="100" value="50">
+      <output id="sensOut">50</output>
+    </div>
+    <div class="ctl-row">
+      <label for="minDur">Min Duration</label>
+      <input type="range" id="minDur" min="200" max="1500" step="100" value="400">
+      <output id="minDurOut">.4s</output>
+    </div>
+    <div class="toggles">
+      <button class="tog on" id="togVib">Vibrate</button>
+      <button class="tog on" id="togFlash">Flash</button>
+      <button class="tog" id="togTone">Chime</button>
+    </div>
+  </section>
+
+  <section class="frame">
+    <i class="corner c-tl"></i><i class="corner c-tr"></i><i class="corner c-bl"></i><i class="corner c-br"></i>
+    <div class="log-head"><h2>Whisper Ledger</h2><button id="clearLog">Clear</button></div>
+    <ul id="log"></ul>
+  </section>
+
+  <div class="telemetry">
+    <span>HEALTH <b id="tHealth">idle</b></span>
+    <span>PRESSURE <b id="tFps">0fps</b></span>
+    <span>FRAMES <b id="tFrames">0</b></span>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════
+   SUSURRUS v1.0 — whisper detection engine
+   Pipeline: AudioEngine → FeatureExtractor → Classifier
+             → StateMachine → AlertSink / Ledger
+   All thresholds tunable via CFG. No hidden state.
+   ═══════════════════════════════════════════════════════ */
+
+const CFG = {
+  fftSize: 2048,
+  // feature bands (Hz)
+  lowBand:      [60, 400],      // voiced-speech fundamental energy
+  whisperBand:  [1000, 8000],   // whisper turbulence energy
+  analysisBand: [300, 8000],    // flatness / centroid window
+  pitchRange:   [70, 350],      // autocorrelation lag search (voicing)
+  // classifier fusion weights (sum = 1)
+  w: { level:.25, unvoiced:.25, band:.20, flat:.15, mod:.15 },
+  // gate mappings (lo→0, hi→1 smoothstep unless inverted)
+  harmLo:.35, harmHi:.70,       // inverted: low harmonicity = whisper
+  bandLo:.45, bandHi:.75,       // whisperBand /(low+whisper) power ratio
+  flatLo:.20, flatHi:.55,       // spectral flatness
+  modLo:.12,  modHi:.45,        // envelope coefficient of variation
+  levelMargin: 5,               // dB above floor to open the level gate
+  levelCeil:  26,               // dB above floor where "voiced speech" likely
+  // temporal state machine
+  attackMs: 250,                // sustained score before CANDIDATE→DETECTED
+  releaseMs: 600,               // sustained silence before release
+  envWindowMs: 1500,            // syllabic modulation window
+  calibMs: 2000,                // ambient floor capture on arm
+  floorAlpha: .004,             // slow adaptive floor tracking (QUIET only)
+};
+
+/* ── state ─────────────────────────────────────────── */
+const S = {
+  armed:false, ctx:null, analyser:null, stream:null,
+  freq:null, time:null, binHz:0,
+  floorDb:-70, calibrating:false, calibSamples:[], calibUntil:0,
+  envBuf:[], envCap:90,
+  phase:'DORMANT',              // DORMANT | QUIET | CANDIDATE | DETECTED
+  aboveSince:0, belowSince:0, eventStart:0, eventPeak:0,
+  frames:0, lastFpsT:0, fpsFrames:0, raf:0,
+  score:0, smScore:0,
+};
+
+const $ = id => document.getElementById(id);
+const els = {
+  verdict:$('verdict'), confBar:$('confBar'), confTrack:$('confTrack'),
+  rLvl:$('rLvl'), rFlr:$('rFlr'), rScr:$('rScr'), rHrm:$('rHrm'), rBnd:$('rBnd'), rMod:$('rMod'),
+  arm:$('armBtn'), err:$('err'), sens:$('sens'), sensOut:$('sensOut'),
+  minDur:$('minDur'), minDurOut:$('minDurOut'),
+  togVib:$('togVib'), togFlash:$('togFlash'), togTone:$('togTone'),
+  log:$('log'), tHealth:$('tHealth'), tFps:$('tFps'), tFrames:$('tFrames'),
+  canvas:$('sigil'),
+};
+const alerts = { vib:true, flash:true, tone:false };
+
+/* ── math primitives ───────────────────────────────── */
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const smooth = (v,lo,hi) => { const t = clamp((v-lo)/(hi-lo),0,1); return t*t*(3-2*t); };
+const dbToPow = db => Math.pow(10, db/10);
+
+/* ── AudioEngine ───────────────────────────────────── */
+async function arm(){
+  try{
+    // CRITICAL: browser DSP (NS/AGC/EC) suppresses exactly the whisper
+    // signal we hunt. All three must be disabled.
+    S.stream = await navigator.mediaDevices.getUserMedia({ audio:{
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false,
+      channelCount:1,
+    }});
+    S.ctx = new (window.AudioContext||window.webkitAudioContext)();
+    if(S.ctx.state === 'suspended') await S.ctx.resume();
+    const src = S.ctx.createMediaStreamSource(S.stream);
+    S.analyser = S.ctx.createAnalyser();
+    S.analyser.fftSize = CFG.fftSize;
+    S.analyser.smoothingTimeConstant = 0;   // engine does its own smoothing
+    src.connect(S.analyser);
+    S.binHz = S.ctx.sampleRate / CFG.fftSize;
+    S.freq = new Float32Array(S.analyser.frequencyBinCount);
+    S.time = new Float32Array(CFG.fftSize);
+    S.armed = true;
+    S.calibrating = true;
+    S.calibSamples = [];
+    S.calibUntil = performance.now() + CFG.calibMs;
+    S.envBuf = [];
+    setPhase('QUIET');
+    els.arm.textContent = 'Disarm';
+    els.arm.classList.add('armed');
+    els.err.style.display = 'none';
+    els.tHealth.textContent = 'calibrating';
+    S.raf = requestAnimationFrame(tick);
+  }catch(e){
+    els.err.textContent = 'Microphone denied. The ward cannot listen without it.';
+    els.err.style.display = 'block';
+  }
+}
+function disarm(){
+  S.armed = false;
+  cancelAnimationFrame(S.raf);
+  if(S.stream) S.stream.getTracks().forEach(t=>t.stop());
+  if(S.ctx) S.ctx.close();
+  S.ctx = null; S.stream = null;
+  setPhase('DORMANT');
+  els.arm.textContent = 'Arm the Ward';
+  els.arm.classList.remove('armed');
+  els.tHealth.textContent = 'idle';
+  drawSigil(null, 0);
+}
+
+/* ── FeatureExtractor ──────────────────────────────── */
+function binRange([lo,hi]){ return [Math.max(1,Math.round(lo/S.binHz)), Math.min(S.freq.length-1, Math.round(hi/S.binHz))]; }
+
+function extract(){
+  S.analyser.getFloatFrequencyData(S.freq);
+  S.analyser.getFloatTimeDomainData(S.time);
+
+  // RMS level (dBFS)
+  let sq = 0;
+  for(let i=0;i<S.time.length;i++) sq += S.time[i]*S.time[i];
+  const rms = Math.sqrt(sq/S.time.length);
+  const rmsDb = rms > 1e-9 ? 20*Math.log10(rms) : -120;
+
+  // band powers
+  const [lLo,lHi] = binRange(CFG.lowBand);
+  const [wLo,wHi] = binRange(CFG.whisperBand);
+  let lowP=0, whP=0;
+  for(let i=lLo;i<=lHi;i++) lowP += dbToPow(S.freq[i]);
+  for(let i=wLo;i<=wHi;i++) whP  += dbToPow(S.freq[i]);
+  const bandRatio = whP / (lowP + whP + 1e-12);
+
+  // spectral flatness over analysis band (geo/arith mean of power)
+  const [aLo,aHi] = binRange(CFG.analysisBand);
+  let logSum=0, linSum=0, n=0;
+  for(let i=aLo;i<=aHi;i++){ const p = dbToPow(S.freq[i]) + 1e-12; logSum += Math.log(p); linSum += p; n++; }
+  const flatness = Math.exp(logSum/n) / (linSum/n);
+
+  // harmonicity: peak normalized autocorrelation across pitch lags
+  const sr = S.ctx.sampleRate;
+  const lagMin = Math.floor(sr/CFG.pitchRange[1]);
+  const lagMax = Math.min(Math.floor(sr/CFG.pitchRange[0]), S.time.length-1);
+  let e0 = sq + 1e-12, best = 0;
+  for(let lag=lagMin; lag<=lagMax; lag+=2){
+    let ac = 0;
+    for(let i=0;i<S.time.length-lag;i+=2) ac += S.time[i]*S.time[i+lag];
+    ac = (2*ac)/e0;
+    if(ac>best) best = ac;
+  }
+  const harmonicity = clamp(best,0,1);
+
+  // syllabic envelope modulation: CV of recent RMS history
+  S.envBuf.push(rms);
+  if(S.envBuf.length > S.envCap) S.envBuf.shift();
+  let mean=0; for(const v of S.envBuf) mean += v; mean /= S.envBuf.length;
+  let varr=0; for(const v of S.envBuf) varr += (v-mean)*(v-mean); varr /= S.envBuf.length;
+  const cv = mean > 1e-7 ? Math.sqrt(varr)/mean : 0;
+
+  return { rmsDb, bandRatio, flatness, harmonicity, cv };
+}
+
+/* ── Classifier ────────────────────────────────────── */
+function classify(f){
+  const margin = f.rmsDb - S.floorDb;
+  const level    = smooth(margin, CFG.levelMargin, CFG.levelMargin+6)
+                 * (1 - smooth(margin, CFG.levelCeil, CFG.levelCeil+8)); // reject loud voiced speech
+  const unvoiced = 1 - smooth(f.harmonicity, CFG.harmLo, CFG.harmHi);
+  const band     = smooth(f.bandRatio, CFG.bandLo, CFG.bandHi);
+  const flat     = smooth(f.flatness, CFG.flatLo, CFG.flatHi);
+  const mod      = smooth(f.cv, CFG.modLo, CFG.modHi);
+  const w = CFG.w;
+  const score = w.level*level + w.unvoiced*unvoiced + w.band*band + w.flat*flat + w.mod*mod;
+  // level gate is a hard prerequisite — silence scores zero regardless of spectrum
+  return { score: level < .05 ? 0 : score, gates:{level,unvoiced,band,flat,mod}, margin };
+}
+
+/* ── StateMachine ──────────────────────────────────── */
+function threshold(){ return .78 - (parseInt(els.sens.value,10)/100)*.38; } // 0→.78 strict, 100→.40 loose
+
+function step(res, now){
+  const th = threshold();
+  els.confTrack.style.setProperty('--thresh', (th*100)+'%');
+  const above = res.score >= th;
+  const minDur = parseInt(els.minDur.value,10);
+
+  if(S.phase==='QUIET'){
+    if(above){
+      if(!S.aboveSince) S.aboveSince = now;
+      if(now - S.aboveSince >= Math.min(CFG.attackMs, minDur)) {
+        setPhase('CANDIDATE'); S.eventStart = S.aboveSince; S.eventPeak = res.score;
+      }
+    } else {
+      S.aboveSince = 0;
+      // slow adaptive floor while genuinely quiet
+      S.floorDb += (res.margin < 3 ? CFG.floorAlpha : 0) * (res.margin);
+    }
+  }
+  else if(S.phase==='CANDIDATE'){
+    S.eventPeak = Math.max(S.eventPeak, res.score);
+    if(above){
+      if(now - S.eventStart >= minDur){ setPhase('DETECTED'); fireAlert(); }
+    } else { setPhase('QUIET'); S.aboveSince = 0; }
+  }
+  else if(S.phase==='DETECTED'){
+    S.eventPeak = Math.max(S.eventPeak, res.score);
+    if(!above){
+      if(!S.belowSince) S.belowSince = now;
+      if(now - S.belowSince >= CFG.releaseMs){
+        ledger(S.eventStart, now - CFG.releaseMs, S.eventPeak);
+        setPhase('QUIET'); S.aboveSince = 0; S.belowSince = 0;
+      }
+    } else S.belowSince = 0;
+  }
+}
+
+function setPhase(p){
+  S.phase = p;
+  const v = els.verdict;
+  v.className = 'verdict';
+  if(p==='DORMANT'){ v.textContent='Dormant'; }
+  else if(p==='QUIET'){ v.textContent='Warding'; v.classList.add('armed'); }
+  else if(p==='CANDIDATE'){ v.textContent='Stirring'; v.classList.add('candidate'); }
+  else if(p==='DETECTED'){ v.textContent='Whisper'; v.classList.add('detected'); }
+}
+
+/* ── AlertSink ─────────────────────────────────────── */
+function fireAlert(){
+  if(alerts.vib && navigator.vibrate) navigator.vibrate([120,60,120]);
+  if(alerts.flash){ document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash'); }
+  if(alerts.tone && S.ctx){
+    const o = S.ctx.createOscillator(), g = S.ctx.createGain();
+    o.frequency.value = 660; o.type='sine';
+    g.gain.setValueAtTime(.0001, S.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.12, S.ctx.currentTime+.02);
+    g.gain.exponentialRampToValueAtTime(.0001, S.ctx.currentTime+.35);
+    o.connect(g).connect(S.ctx.destination);
+    o.start(); o.stop(S.ctx.currentTime+.4);
+  }
+}
+
+/* ── Ledger ────────────────────────────────────────── */
+function ledger(startT, endT, peak){
+  const li = document.createElement('li');
+  const t = new Date(performance.timeOrigin + startT);
+  const hh = String(t.getHours()).padStart(2,'0'), mm = String(t.getMinutes()).padStart(2,'0'), ss = String(t.getSeconds()).padStart(2,'0');
+  const dur = ((endT-startT)/1000).toFixed(1);
+  li.innerHTML = `<span class="t">${hh}:${mm}:${ss}</span><span class="d">${dur}s</span><span class="c">${Math.round(peak*100)}%</span>`;
+  els.log.prepend(li);
+  while(els.log.children.length > 60) els.log.lastChild.remove();
+}
+
+/* ── Sigil renderer ────────────────────────────────── */
+const cvs = els.canvas, g2 = cvs.getContext('2d');
+function sizeCanvas(){
+  const dpr = Math.min(devicePixelRatio||1, 2);
+  const w = cvs.clientWidth || 300;
+  cvs.width = w*dpr; cvs.height = w*dpr;
+  g2.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize', sizeCanvas);
+
+function drawSigil(freq, score){
+  const w = cvs.clientWidth || 300, cx = w/2, cy = w/2;
+  g2.clearRect(0,0,w,w);
+  const R0 = w*.30, Rmax = w*.145;
+  const detected = S.phase==='DETECTED';
+
+  // outer engraved rings
+  g2.strokeStyle = detected ? 'rgba(212,84,58,.55)' : 'rgba(201,168,76,.30)';
+  g2.lineWidth = 1;
+  g2.beginPath(); g2.arc(cx,cy,w*.475,0,7); g2.stroke();
+  g2.strokeStyle = 'rgba(201,168,76,.12)';
+  g2.beginPath(); g2.arc(cx,cy,w*.455,0,7); g2.stroke();
+  // cardinal ticks
+  g2.strokeStyle = 'rgba(201,168,76,.45)';
+  for(let k=0;k<8;k++){
+    const a = k*Math.PI/4 - Math.PI/2;
+    const r1 = w*.455, r2 = w*(k%2===0?.49:.475);
+    g2.beginPath();
+    g2.moveTo(cx+Math.cos(a)*r1, cy+Math.sin(a)*r1);
+    g2.lineTo(cx+Math.cos(a)*r2, cy+Math.sin(a)*r2);
+    g2.stroke();
+  }
+
+  const SEG = 96;
+  if(freq && S.armed){
+    // log-frequency mapping 100 Hz → 10 kHz around the ring
+    const fLo = Math.log(100), fHi = Math.log(10000);
+    for(let s=0;s<SEG;s++){
+      const frac = s/SEG;
+      const hz = Math.exp(fLo + frac*(fHi-fLo));
+      const bin = clamp(Math.round(hz/S.binHz), 1, freq.length-1);
+      const mag = clamp((freq[bin]+95)/60, 0, 1);          // -95..-35 dB → 0..1
+      const len = 3 + mag*Rmax;
+      const a = frac*Math.PI*2 - Math.PI/2;
+      const inWhisper = hz >= CFG.whisperBand[0] && hz <= CFG.whisperBand[1];
+      const alpha = .25 + mag*.75;
+      g2.strokeStyle = detected
+        ? `rgba(212,84,58,${alpha})`
+        : inWhisper ? `rgba(201,168,76,${alpha})` : `rgba(139,92,246,${alpha*.6})`;
+      g2.lineWidth = 2;
+      g2.beginPath();
+      g2.moveTo(cx+Math.cos(a)*R0, cy+Math.sin(a)*R0);
+      g2.lineTo(cx+Math.cos(a)*(R0+len), cy+Math.sin(a)*(R0+len));
+      g2.stroke();
+    }
+  }
+
+  // inner core: confidence disc
+  const coreR = w*.16;
+  const grd = g2.createRadialGradient(cx,cy,0,cx,cy,coreR);
+  const coreCol = detected ? '212,84,58' : '201,168,76';
+  grd.addColorStop(0, `rgba(${coreCol},${.10 + score*.45})`);
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g2.fillStyle = grd;
+  g2.beginPath(); g2.arc(cx,cy,coreR,0,7); g2.fill();
+  g2.strokeStyle = `rgba(${coreCol},.5)`;
+  g2.beginPath(); g2.arc(cx,cy,coreR*(0.55+score*0.45),0,7); g2.stroke();
+
+  // dormant glyph
+  if(!S.armed){
+    g2.fillStyle = 'rgba(154,143,124,.6)';
+    g2.font = `700 ${w*.055}px Cinzel, serif`;
+    g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    g2.fillText('SILENT', cx, cy);
+  }
+}
+
+/* ── main loop ─────────────────────────────────────── */
+function tick(now){
+  if(!S.armed) return;
+  S.frames++; S.fpsFrames++;
+  if(now - S.lastFpsT >= 1000){
+    els.tFps.textContent = S.fpsFrames + 'fps';
+    els.tFrames.textContent = S.frames;
+    S.lastFpsT = now; S.fpsFrames = 0;
+  }
+
+  const f = extract();
+
+  if(S.calibrating){
+    S.calibSamples.push(f.rmsDb);
+    if(now >= S.calibUntil){
+      S.calibSamples.sort((a,b)=>a-b);
+      S.floorDb = S.calibSamples[Math.floor(S.calibSamples.length/2)] || -70;
+      S.calibrating = false;
+      els.tHealth.textContent = 'listening';
+    }
+    drawSigil(S.freq, 0);
+    S.raf = requestAnimationFrame(tick);
+    return;
+  }
+
+  const res = classify(f);
+  S.smScore = S.smScore*.7 + res.score*.3;
+  step({score:S.smScore, margin:res.margin}, now);
+
+  // readouts
+  els.rLvl.textContent = f.rmsDb.toFixed(0)+'dB';
+  els.rFlr.textContent = S.floorDb.toFixed(0)+'dB';
+  els.rScr.textContent = Math.round(S.smScore*100)+'%';
+  els.rScr.className = 'v' + (S.smScore>=threshold()?' hot':'');
+  els.rHrm.textContent = Math.round(res.gates.unvoiced*100)+'%';
+  els.rBnd.textContent = Math.round(f.bandRatio*100)+'%';
+  els.rMod.textContent = f.cv.toFixed(2);
+  els.confBar.style.width = (S.smScore*100)+'%';
+
+  drawSigil(S.freq, S.smScore);
+  S.raf = requestAnimationFrame(tick);
+}
+
+/* ── wiring ────────────────────────────────────────── */
+els.arm.addEventListener('click', ()=> S.armed ? disarm() : arm());
+els.sens.addEventListener('input', ()=> els.sensOut.textContent = els.sens.value);
+els.minDur.addEventListener('input', ()=> els.minDurOut.textContent = (parseInt(els.minDur.value,10)/1000)+'s');
+[['togVib','vib'],['togFlash','flash'],['togTone','tone']].forEach(([id,key])=>{
+  els[id].addEventListener('click', ()=>{ alerts[key]=!alerts[key]; els[id].classList.toggle('on', alerts[key]); });
+});
+$('clearLog').addEventListener('click', ()=> els.log.innerHTML = '');
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && S.armed) els.tHealth.textContent = 'backgrounded';
+  else if(S.armed) els.tHealth.textContent = 'listening';
+});
+
+sizeCanvas();
+drawSigil(null, 0);
+</script>
+</body>
+</html>
