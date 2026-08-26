@@ -162,6 +162,30 @@
 
 ---
 
+### SENTINEL — Phone Intrusion Scanner
+
+A desktop tool, not a browser module. Plug the phone in over USB and run
+`sentinel/sentinel scan` to find out what was put on it via AirDrop, Quick Share,
+Bluetooth or WiFi.
+
+The browser cannot do this job. iOS and Android sandbox every app, so nothing
+running on the phone — including the rest of VIGIL — can read another app's
+storage. Reading real device state requires talking to the phone from outside,
+over adb (Android) or lockdown (iOS). SENTINEL does that and states its limits
+plainly rather than faking coverage it doesn't have.
+
+```bash
+cd sentinel
+./sentinel scan --baseline    # record a known-good reference, once
+./sentinel scan               # later: lists exactly what appeared since
+./sentinel scan --watch 60    # iPhone: watch sharingd for live AirDrop transfers
+```
+
+Its core detector is the baseline diff — a new app or file since a snapshot you
+trust is evidence, not a heuristic. Full documentation: [`sentinel/README.md`](sentinel/README.md).
+
+---
+
 ## Architecture
 
 ```
@@ -170,10 +194,11 @@ vigil/
 ├── manifest.json               ← PWA
 ├── sw.js                       ← Service worker (vigil-v1)
 ├── vercel.json                 ← COOP/COEP headers, camera/mic Permissions-Policy
-└── modules/
-    ├── liminal/engine.js       ← Full LIMINAL detection engine (2100+ lines)
-    ├── amplify/engine.js       ← Full AMPLIFY DSP engine (700+ lines)
-    └── nightvision/engine.js  ← Full NVS camera engine (500+ lines)
+├── modules/
+│   ├── liminal/engine.js       ← Full LIMINAL detection engine (2100+ lines)
+│   ├── amplify/engine.js       ← Full AMPLIFY DSP engine (700+ lines)
+│   └── nightvision/engine.js  ← Full NVS camera engine (500+ lines)
+└── sentinel/                   ← SENTINEL: desktop phone-intrusion scanner (Python)
 ```
 
 **Module contract** — every engine exports `{ init(container), destroy(), health() }`.
