@@ -1,0 +1,7 @@
+# SENTINEL is a desktop CLI, not part of the web build. Excluding it keeps the
+# static deploy lean and stops Python source being served from the edge — the
+# catch-all rewrite in vercel.json only applies when no real file matches.
+sentinel/
+
+__pycache__/
+*.py[cod]
