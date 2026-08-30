@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>VIGIL · SWEEP</title>
+<style>
+/* System fonts only — no webfont request, so first paint is immediate. */
+:root{
+  --s0:#04070a; --s1:#090d12; --s2:#0f1520; --s3:#16202e; --s4:#1e2d3d;
+  --tx0:#dde6f0; --tx1:#7a8fa6; --tx2:#2e4057;
+  --ac:#ffa62b;
+  --ac-g:rgba(255,166,43,0.09);
+  --ac-b:rgba(255,166,43,0.2);
+  --ok:#22d66c; --ok-g:rgba(34,214,108,0.1);
+  --warn:#f59e0b; --warn-g:rgba(245,158,11,0.1);
+  --err:#ef4444; --err-g:rgba(239,68,68,0.1);
+  --f-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --f-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--s0);color:var(--tx0);font-family:var(--f-ui);font-size:15px;line-height:1.5;-webkit-text-size-adjust:100%}
+body{padding:0 0 calc(40px + var(--safe-b))}
+.wrap{max-width:640px;margin:0 auto;padding:0 14px}
+
+/* ── intro ── */
+.intro{padding:20px 0 4px}
+.eyebrow{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--ac);margin-bottom:8px}
+h1{font-size:26px;line-height:1.1;letter-spacing:-.01em;font-weight:700;margin-bottom:8px}
+.lede{font-size:14px;color:var(--tx1);max-width:46ch}
+.lede b{color:var(--tx0);font-weight:600}
+
+.note{
+  margin:16px 0 0;padding:13px 15px;
+  background:var(--s1);border:1px solid var(--s4);border-radius:8px;
+  font-size:13px;color:var(--tx1);
+}
+.note b{color:var(--tx0);font-weight:600}
+.note p+p{margin-top:8px}
+
+/* ── section heads ── */
+.shead{display:flex;align-items:center;gap:10px;margin:30px 0 12px}
+.snum{font-family:var(--f-mono);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--tx2);border:1px solid var(--s4);border-radius:3px;padding:3px 6px;flex-shrink:0}
+.shead h2{font-size:16px;font-weight:700;letter-spacing:-.005em}
+.shead p{font-size:12.5px;color:var(--tx1)}
+.stext{display:flex;flex-direction:column}
+
+/* ── network check ── */
+.net{background:var(--s1);border:1px solid var(--s4);border-radius:9px;overflow:hidden}
+.net-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px}
+.net-top h3{font-size:15px;font-weight:600}
+.net-top p{font-size:12.5px;color:var(--tx1);margin-top:2px}
+.run{
+  flex-shrink:0;background:var(--ac);color:#04070a;border:none;border-radius:6px;
+  padding:9px 15px;font-family:var(--f-mono);font-size:11px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+  transition:opacity .15s,transform .1s;
+}
+.run:active{transform:scale(.96)}
+.run:disabled{opacity:.45;cursor:default}
+.run:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+
+.rows{border-top:1px solid var(--s4)}
+.rows:empty{display:none}
+.row{display:flex;gap:11px;padding:12px 15px;border-bottom:1px solid var(--s2);align-items:flex-start}
+.row:last-child{border-bottom:none}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:6px;background:var(--tx2)}
+.dot.ok{background:var(--ok);box-shadow:0 0 6px var(--ok-g)}
+.dot.warn{background:var(--warn);box-shadow:0 0 6px var(--warn-g)}
+.dot.err{background:var(--err);box-shadow:0 0 6px var(--err-g)}
+.dot.run{background:var(--ac);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.rbody{flex:1;min-width:0}
+.rname{font-size:13.5px;font-weight:600;margin-bottom:1px}
+.rval{font-family:var(--f-mono);font-size:12px;color:var(--tx0);word-break:break-word}
+.rval.dim{color:var(--tx1)}
+.rwhy{font-size:12px;color:var(--tx1);margin-top:4px}
+
+/* ── checks ── */
+.chk{background:var(--s1);border:1px solid var(--s4);border-radius:9px;padding:15px;margin-bottom:9px;transition:opacity .18s}
+.chk.done{opacity:.5}
+.chd{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px}
+.cn{font-family:var(--f-mono);font-size:11px;font-weight:600;width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--s2);border:1px solid var(--s4);border-radius:3px;color:var(--tx1)}
+.chd h3{font-size:15.5px;font-weight:600;line-height:1.25;flex:1}
+.tag{font-family:var(--f-mono);font-size:8.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;padding:4px 6px;border-radius:3px;flex-shrink:0;margin-top:2px}
+.tag.now{background:var(--err-g);color:var(--err)}
+.tag.chk2{background:var(--ac-g);color:var(--ac)}
+.tag.hard{background:var(--warn-g);color:var(--warn)}
+.chk p{font-size:13.5px;color:var(--tx1);margin-bottom:10px}
+.chk strong{color:var(--tx0);font-weight:600}
+.path{display:block;font-family:var(--f-mono);font-size:11.5px;line-height:1.6;background:var(--s0);border:1px solid var(--s3);border-left:2px solid var(--ac);border-radius:0 4px 4px 0;padding:8px 11px;margin-bottom:10px;overflow-x:auto;white-space:nowrap;color:var(--tx0)}
+.path i{color:var(--tx2);font-style:normal;padding:0 2px}
+.vs{display:flex;flex-direction:column;gap:6px;margin-bottom:11px}
+.v{display:flex;gap:8px;font-size:12.5px;line-height:1.45}
+.vl{font-family:var(--f-mono);font-size:8.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;flex-shrink:0;width:44px;padding-top:3px}
+.v.g .vl{color:var(--ok)} .v.b .vl{color:var(--err)}
+.v span:last-child{color:var(--tx1)}
+.v.b span:last-child{color:var(--tx0)}
+.mk{display:inline-flex;align-items:center;gap:7px;font-family:var(--f-mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;background:none;color:var(--tx2);border:1px solid var(--s4);border-radius:4px;padding:7px 11px;cursor:pointer;transition:color .15s,border-color .15s}
+.mk:active{transform:scale(.97)}
+.mk:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.bx{width:11px;height:11px;border:1.5px solid currentColor;border-radius:2px;position:relative;flex-shrink:0}
+.chk.done .mk{color:var(--ok);border-color:var(--ok)}
+.chk.done .bx{background:var(--ok);border-color:var(--ok)}
+.chk.done .bx::after{content:"";position:absolute;left:3px;top:.5px;width:3px;height:6.5px;border:solid var(--s1);border-width:0 1.6px 1.6px 0;transform:rotate(42deg)}
+
+/* ── progress ── */
+.prog{position:sticky;top:0;z-index:9;background:var(--s0);padding:11px 0 9px;border-bottom:1px solid var(--s4);margin-bottom:2px}
+.prow{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--f-mono);font-size:11px;color:var(--tx1);margin-bottom:7px}
+.prow b{color:var(--tx0);font-variant-numeric:tabular-nums}
+.clr{background:none;border:none;font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx2);text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0}
+.trk{height:2px;background:var(--s4);border-radius:2px;overflow:hidden}
+.fil{height:100%;width:0;background:var(--ac);transition:width .3s cubic-bezier(.3,.8,.4,1)}
+
+.end{margin-top:28px;padding:18px 16px;background:var(--s1);border:1px solid var(--s4);border-radius:9px}
+.end h2{font-size:17px;font-weight:700;margin-bottom:10px}
+.end p{font-size:13.5px;color:var(--tx1);margin-bottom:10px}
+.end p:last-child{margin-bottom:0}
+.end b{color:var(--tx0);font-weight:600}
+footer{margin-top:22px;font-family:var(--f-mono);font-size:10.5px;line-height:1.7;color:var(--tx2)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="intro">
+  <p class="eyebrow">Do this on the phone itself</p>
+  <h1>Safety Sweep</h1>
+  <p class="lede">A live check of the network you're on, then twelve checks that find what someone put on this phone — and shut the door they used. <b>Everything here is built into iOS.</b></p>
+</div>
+
+<div class="note">
+  <p>iOS locks every app inside its own sandbox. That protects you, but it also means <b>nothing can list every file on your phone</b> — not this page, not an App Store "scanner", not Apple. Anything claiming a full virus scan of an iPhone is showing you an animation.</p>
+  <p>What a payload <b>can't</b> hide is what it needs to work: a configuration profile, an app that skipped the App Store, a permission it was granted, or a device on your account. That's what these checks hunt.</p>
+</div>
+
+<div class="prog">
+  <div class="prow"><span><b id="dn">0</b> of <b>12</b> checks done</span><button class="clr" id="clr" type="button">Clear</button></div>
+  <div class="trk"><div class="fil" id="fil"></div></div>
+</div>
+
+<!-- ── NETWORK ── -->
+<div class="shead">
+  <span class="snum">00</span>
+  <div class="stext">
+    <h2>This network</h2>
+    <p>Measured live, right now, from this phone.</p>
+  </div>
+</div>
+
+<div class="net">
+  <div class="net-top">
+    <div>
+      <h3>Network check</h3>
+      <p>Five real measurements. Takes about five seconds.</p>
+    </div>
+    <button class="run" id="run" type="button">Run</button>
+  </div>
+  <div class="rows" id="rows"></div>
+</div>
+
+<!-- ── PHASE 1 ── -->
+<div class="shead">
+  <span class="snum">01</span>
+  <div class="stext">
+    <h2>Shut the door</h2>
+    <p>These stop access that may be open right now.</p>
+  </div>
+</div>
+
+<article class="chk" data-id="c1">
+  <div class="chd"><span class="cn">1</span><h3>Turn AirDrop receiving off</h3><span class="tag now">Now</span></div>
+  <p>If AirDrop is set to <strong>Everyone</strong>, anyone within about 30 feet can push files at you. This is the door most people leave open.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> AirDrop <i>›</i> Receiving Off</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Set to</span><span><strong>Receiving Off</strong>, or <strong>Contacts Only</strong> if you use it.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>"Everyone". Note that "Everyone for 10 Minutes" expires by itself — if it shows Everyone permanently, something set it that way.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c2">
+  <div class="chd"><span class="cn">2</span><h3>Look for a configuration profile</h3><span class="tag now">Now</span></div>
+  <p><strong>The most important check here.</strong> A configuration profile is a small file that can be AirDropped or emailed to you. One tap installs it, and it can add a VPN, reroute your traffic, install a certificate that lets someone read your encrypted browsing, and lock settings you can't change back. It's the most powerful thing anyone can put on an iPhone without jailbreaking it.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> VPN &amp; Device Management</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>The row doesn't exist at all, or it opens to <strong>Not Connected</strong> with nothing listed. No row under General is the best outcome.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Any profile you didn't install. Tap it → <strong>Remove Profile</strong>. If it won't remove, or wants a passcode you never set, go to the last section.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c3">
+  <div class="chd"><span class="cn">3</span><h3>Check what's signed into your account</h3><span class="tag now">Now</span></div>
+  <p>Someone else's device on your Apple Account is far worse than anything AirDropped — it can mean your photos, messages, backups and location are readable continuously, from anywhere.</p>
+  <span class="path">Settings <i>›</i> [your name at the top] <i>›</i> scroll to the device list</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>Every device listed is one you own and could point at right now.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Anything unfamiliar. Tap it → <strong>Remove from Account</strong>, then change your Apple Account password and turn on two-factor.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<!-- ── PHASE 2 ── -->
+<div class="shead">
+  <span class="snum">02</span>
+  <div class="stext">
+    <h2>Find what's there</h2>
+    <p>Sweep for anything that got in and stayed.</p>
+  </div>
+</div>
+
+<article class="chk" data-id="c4">
+  <div class="chd"><span class="cn">4</span><h3>Run Apple's Safety Check</h3><span class="tag chk2">Check</span></div>
+  <p>Apple built this for exactly your situation. It shows every person and app you're sharing data with, in one place, and can cut it all off at once. Needs iOS 16 or newer.</p>
+  <span class="path">Settings <i>›</i> Privacy &amp; Security <i>›</i> Safety Check</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Use</span><span><strong>Manage Sharing &amp; Access</strong> to review calmly — people, then apps, then account security.</span></div>
+    <div class="v b"><span class="vl">Urgent</span><span><strong>Emergency Reset</strong> stops all sharing with everyone immediately. Use it if you think access is ongoing.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c5">
+  <div class="chd"><span class="cn">5</span><h3>Read your full app list</h3><span class="tag chk2">Check</span></div>
+  <p>The Home Screen hides apps in folders, in the App Library, and on pages you've switched off. This screen shows <strong>everything</strong> installed, no exceptions.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> iPhone Storage</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>You recognise every entry. Scroll the whole list — don't skim the bottom.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Anything unfamiliar, or with a generic name and blank icon. Tap → <strong>Delete App</strong>.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c6">
+  <div class="chd"><span class="cn">6</span><h3>Audit microphone, camera and location</h3><span class="tag chk2">Check</span></div>
+  <p>Work through these one at a time. Each screen lists every app that asked, and whether you granted it.</p>
+  <span class="path">Settings <i>›</i> Privacy &amp; Security <i>›</i> Microphone / Camera / Location / Photos / Contacts</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>Every app with access has an obvious reason. Location on <strong>While Using</strong> rather than Always.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Anything on <strong>Always</strong> location, or mic/camera access that makes no sense. Switch it off — apps just ask again.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c7">
+  <div class="chd"><span class="cn">7</span><h3>Check for a keyboard with Full Access</h3><span class="tag chk2">Check</span></div>
+  <p>A third-party keyboard granted "Full Access" can see <strong>every character you type</strong> — passwords, messages, card numbers — and send it anywhere. Quiet, effective, and almost nobody looks here.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> Keyboard <i>›</i> Keyboards</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>Only <strong>English</strong> (or your languages) and <strong>Emoji</strong>. Those are Apple's own.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Any keyboard you didn't add. Swipe left to delete. If you keep one, turn <strong>Allow Full Access</strong> off.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c8">
+  <div class="chd"><span class="cn">8</span><h3>Check location sharing and Screen Time</h3><span class="tag chk2">Check</span></div>
+  <p>Two settings meant for families that get quietly repurposed to monitor adults. Screen Time can report activity elsewhere and be locked with a passcode you don't know.</p>
+  <span class="path">Settings <i>›</i> [your name] <i>›</i> Find My <i>›</i> Share My Location</span>
+  <span class="path">Settings <i>›</i> Screen Time</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Clean</span><span>Sharing location only with people you chose. Screen Time off, or with no passcode you didn't set.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Anyone unexpected under Share My Location — tap → <strong>Stop Sharing</strong>. Or a Screen Time passcode you never created.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<!-- ── PHASE 3 ── -->
+<div class="shead">
+  <span class="snum">03</span>
+  <div class="stext">
+    <h2>Close it behind you</h2>
+    <p>Revoke old access and make the next attempt harder.</p>
+  </div>
+</div>
+
+<article class="chk" data-id="c9">
+  <div class="chd"><span class="cn">9</span><h3>Revoke every trusted computer</h3><span class="tag hard">Harden</span></div>
+  <p>Every time you tapped <strong>"Trust This Computer"</strong>, iOS saved a permanent pairing for that machine. It survives reboots and lets that computer pull a full backup whenever connected. No screen lists them — this clears them all.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> Transfer or Reset iPhone <i>›</i> Reset <i>›</i> Reset Location &amp; Privacy</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Safe</span><span>Does <strong>not</strong> erase your data. Clears pairings and resets app permissions, so apps ask again. Worth doing regardless.</span></div>
+    <div class="v b"><span class="vl">Why</span><span>If anyone ever plugged your phone into their computer — even "just to charge" — this is the only way to take that access back.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c10">
+  <div class="chd"><span class="cn">10</span><h3>Set a strong passcode</h3><span class="tag hard">Harden</span></div>
+  <p>Everything above assumes nobody can just pick your phone up and unlock it. Four digits is read over your shoulder in one glance; six is a thousand times harder.</p>
+  <span class="path">Settings <i>›</i> Face ID &amp; Passcode <i>›</i> Change Passcode <i>›</i> Passcode Options</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Set to</span><span><strong>Custom Numeric Code</strong>, six digits or more. Not a birthday, not a year.</span></div>
+    <div class="v b"><span class="vl">Also</span><span>On that screen turn off <strong>Accessories</strong> under "Allow Access When Locked" — that blocks USB access to a locked phone.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c11">
+  <div class="chd"><span class="cn">11</span><h3>Update iOS</h3><span class="tag hard">Harden</span></div>
+  <p>Most real iPhone attacks use a flaw Apple already fixed. Boring, and one of the highest-value things on this list.</p>
+  <span class="path">Settings <i>›</i> General <i>›</i> Software Update</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">Do</span><span>Install anything pending, then turn on <strong>Automatic Updates</strong> and <strong>Security Responses</strong>.</span></div>
+    <div class="v b"><span class="vl">Bad</span><span>Several versions behind. If the phone can't update at all, it's no longer getting security fixes.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<article class="chk" data-id="c12">
+  <div class="chd"><span class="cn">12</span><h3>Consider Lockdown Mode</h3><span class="tag hard">Harden</span></div>
+  <p>Apple's maximum-security setting. Blocks incoming invitations and attachment types from anyone you haven't messaged first, and shuts off wired connections to a locked phone.</p>
+  <span class="path">Settings <i>›</i> Privacy &amp; Security <i>›</i> Lockdown Mode</span>
+  <div class="vs">
+    <div class="v g"><span class="vl">For</span><span>Anyone who believes a specific person is targeting them. A real, well-built feature — not a gimmick.</span></div>
+    <div class="v b"><span class="vl">Cost</span><span>Some sites, attachments and features stop working. A deliberate trade. Turn it off any time.</span></div>
+  </div>
+  <button class="mk" type="button"><span class="bx"></span>Mark done</button>
+</article>
+
+<div class="end">
+  <h2>If you're still not satisfied</h2>
+  <p>There's an honest limit to what any check can prove. These find what a payload <b>needs</b> to work — but they can't prove the absence of something, and a file saved quietly inside another app's storage is invisible to every tool that exists.</p>
+  <p>If a profile wouldn't remove, if there's a Screen Time passcode you didn't set, or you simply can't shake it, one move <b>definitively</b> works and needs no computer:</p>
+  <p><b>Settings › General › Transfer or Reset iPhone › Erase All Content and Settings.</b> Back up to iCloud first. That wipes everything an attacker could have left, at every level a non-jailbroken iPhone can be reached.</p>
+  <p>One caution: restoring a backup can carry a bad app or profile straight back. If you erase because you found something real, set up as new and reinstall apps by hand. A tedious evening, and completely conclusive.</p>
+  <p>If the person you're worried about is close to you, Apple's Safety Check (check 4) was designed for exactly that, and its <b>Emergency Reset</b> cuts every form of sharing at once.</p>
+</div>
+
+<footer>Every step uses settings built into iOS. The network check runs from this phone and reads nothing about you beyond what any website already sees. Progress ticks are saved only in this browser.</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ─────────── progress ─────────── */
+var KEY = "vigil-sweep-v1";
+var cards = [].slice.call(document.querySelectorAll(".chk"));
+
+var dn = document.getElementById("dn"), fil = document.getElementById("fil");
+
+function load(){
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function save(s){ try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+
+var state = load();
+
+function paint(){
+  var n = 0;
+  cards.forEach(function(c){
+    var on = !!state[c.dataset.id];
+    c.classList.toggle("done", on);
+    var b = c.querySelector(".mk");
+    b.lastChild.nodeValue = on ? "Done" : "Mark done";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) n++;
+  });
+  dn.textContent = n;
+  fil.style.width = (n / cards.length * 100) + "%";
+}
+
+cards.forEach(function(c){
+  c.querySelector(".mk").addEventListener("click", function(){
+    var id = c.dataset.id;
+    if (state[id]) delete state[id]; else state[id] = 1;
+    save(state); paint();
+  });
+});
+document.getElementById("clr").addEventListener("click", function(){
+  state = {}; save(state); paint();
+});
+paint();
+
+
+/* ─────────── network check ─────────── */
+/* Every row below is a real measurement. Where the browser can't answer,
+   the row says so rather than inventing a result. */
+
+var rows = document.getElementById("rows");
+var runBtn = document.getElementById("run");
+
+function addRow(name){
+  var el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = '<span class="dot run"></span><div class="rbody">' +
+                 '<div class="rname"></div><div class="rval dim">checking…</div></div>';
+  el.querySelector(".rname").textContent = name;
+  rows.appendChild(el);
+  return {
+    set: function(status, value, why){
+      el.querySelector(".dot").className = "dot " + status;
+      var v = el.querySelector(".rval");
+      v.textContent = value;
+      v.className = "rval";
+      if (why) {
+        var w = document.createElement("div");
+        w.className = "rwhy";
+        w.textContent = why;
+        el.querySelector(".rbody").appendChild(w);
+      }
+    }
+  };
+}
+
+function median(a){
+  var s = a.slice().sort(function(x,y){ return x - y; });
+  var m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+}
+
+// 1. Is this page actually encrypted?
+function checkSecure(row){
+  if (window.isSecureContext && location.protocol === "https:") {
+    row.set("ok", "HTTPS, verified by this browser",
+      "The certificate for this site passed validation. A network intercepting traffic with an untrusted certificate would have failed here.");
+  } else {
+    row.set("err", location.protocol + " — not a secure connection",
+      "This page is not encrypted, so anything sent over it can be read and rewritten in transit.");
+  }
+}
+
+// 2. Round-trip time to this site — a proxy in the path adds hops.
+function checkLatency(row){
+  var samples = [], i = 0;
+  function once(){
+    var t0 = performance.now();
+    return fetch(location.pathname + "?p=" + Date.now() + "-" + i, { cache: "no-store" })
+      .then(function(r){ return r.text(); })
+      .then(function(){ samples.push(performance.now() - t0); });
+  }
+  var chain = Promise.resolve();
+  for (i = 0; i < 5; i++) chain = chain.then(once);
+  return chain.then(function(){
+    var med = Math.round(median(samples));
+    var jit = Math.round(Math.max.apply(null, samples) - Math.min.apply(null, samples));
+    var txt = med + " ms typical, " + jit + " ms spread";
+    if (med < 250 && jit < 300) {
+      row.set("ok", txt, "Normal for a direct connection.");
+    } else if (med < 800) {
+      row.set("warn", txt, "Slower than a direct connection usually is. Common on busy or distant WiFi — but an extra hop through someone else's machine looks like this too.");
+    } else {
+      row.set("warn", txt, "Very slow or erratic. Congestion and weak signal explain most of this; interception is another explanation worth ruling out.");
+    }
+  }).catch(function(){
+    row.set("warn", "couldn't measure", "The requests didn't complete. You may be offline.");
+  });
+}
+
+// 3. Where does traffic actually leave from?
+//    ipwho.is is the primary: free, CORS-enabled, and it names the operator.
+//    ipify is the fallback and returns the address only.
+function checkExit(row){
+  return fetch("https://ipwho.is/", { cache: "no-store" })
+    .then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+    .then(function(d){
+      if (!d || d.success === false || !d.ip) throw new Error("lookup refused");
+      var c = d.connection || {};
+      var who = c.isp || c.org || "unknown network";
+      var place = [d.city, d.region, d.country].filter(Boolean).join(", ");
+      row.set("ok", d.ip + " · " + who,
+        (place ? "Appears to be in " + place + ". " : "") +
+        "This is the network your traffic exits through. If that is not your home, your phone carrier or your workplace, something is routing you elsewhere \u2014 look for a VPN or proxy in check 2.");
+    })
+    .catch(function(){
+      // Fall back to address-only before giving up.
+      return fetch("https://api.ipify.org?format=json", { cache: "no-store" })
+        .then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+        .then(function(d){
+          if (!d || !d.ip) throw new Error("no data");
+          row.set("ok", d.ip,
+            "Your public address. The operator behind it could not be looked up this time.");
+        })
+        .catch(function(){
+          row.set("warn", "couldn\u2019t determine",
+            "Neither lookup completed. That happens offline, or when a network blocks this kind of request \u2014 which is itself worth noting.");
+        });
+    });
+}
+
+// 4. Encrypted DNS reachable? Networks that filter or watch traffic often block it.
+function checkDoH(row){
+  return fetch("https://cloudflare-dns.com/dns-query?name=one.one.one.one&type=A", {
+      headers: { accept: "application/dns-json" }, cache: "no-store"
+    })
+    .then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+    .then(function(d){
+      var ips = (d.Answer || []).map(function(a){ return a.data; });
+      if (ips.indexOf("1.1.1.1") !== -1) {
+        row.set("ok", "reachable, answers correctly",
+          "Encrypted DNS works on this network and returns the right address, so name lookups aren't being rewritten in the open.");
+      } else {
+        row.set("warn", "reachable, unexpected answer: " + (ips.join(", ") || "none"),
+          "This name resolves to 1.1.1.1 everywhere in the world. A different answer points at something rewriting DNS.");
+      }
+    })
+    .catch(function(){
+      row.set("warn", "blocked or unreachable",
+        "Encrypted DNS didn't get through. Some networks block it deliberately so they can see and filter every site you visit.");
+    });
+}
+
+// 5. Device clock vs. the network's — a wrong clock breaks certificate checks.
+function checkClock(row){
+  var t0 = Date.now();
+  return fetch(location.pathname + "?t=" + t0, { cache: "no-store" })
+    .then(function(r){
+      var hdr = r.headers.get("date");
+      if (!hdr) throw new Error("no date header");
+      var skew = Math.round((new Date(hdr).getTime() - (t0 + Date.now()) / 2) / 1000);
+      var a = Math.abs(skew);
+      if (a <= 60) {
+        row.set("ok", "within " + a + "s of network time", "Normal.");
+      } else if (a <= 600) {
+        row.set("warn", "off by " + a + "s", "Mildly out of step. Usually harmless.");
+      } else {
+        row.set("err", "off by " + Math.round(a / 60) + " minutes",
+          "A badly wrong clock breaks certificate expiry checks, which is one way an expired or forged certificate slips past. Turn on Settings › General › Date & Time › Set Automatically.");
+      }
+    })
+    .catch(function(){
+      row.set("warn", "couldn't compare", "No timestamp came back from the server.");
+    });
+}
+
+function run(){
+  runBtn.disabled = true;
+  runBtn.textContent = "Running";
+  rows.innerHTML = "";
+
+  var rSec   = addRow("Connection to this page");
+  var rLat   = addRow("Round-trip time");
+  var rExit  = addRow("Where your traffic exits");
+  var rDoH   = addRow("Encrypted DNS");
+  var rClock = addRow("Device clock");
+
+  checkSecure(rSec);
+
+  Promise.all([
+    checkLatency(rLat),
+    checkExit(rExit),
+    checkDoH(rDoH),
+    checkClock(rClock)
+  ]).then(function(){
+    runBtn.disabled = false;
+    runBtn.textContent = "Run again";
+  });
+}
+
+runBtn.addEventListener("click", run);
+})();
+</script>
+</body>
+</html>

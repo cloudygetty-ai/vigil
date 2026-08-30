@@ -1,7 +1,7 @@
 # VIGIL
 ### Multi-Sensor Awareness Platform
 
-> LIMINAL · AMPLIFY · NIGHT VISION — every feature, one shell.
+> LIMINAL · AMPLIFY · NIGHT VISION · SWEEP — every feature, one shell.
 
 ---
 
@@ -162,6 +162,61 @@
 
 ---
 
+### SWEEP — iPhone Safety Sweep
+
+**Setup**
+1. Tap the **SWEEP** tab. No permissions requested — it uses no camera, mic or sensors.
+
+**What it's for**
+Finding what someone put on your iPhone via AirDrop, and shutting the door they used. Runs entirely on the phone; no computer needed.
+
+**Network check** — five live measurements of the WiFi you're on right now
+
+| Row | What it actually proves |
+|---|---|
+| **Connection to this page** | The certificate validated. A network intercepting traffic with an untrusted certificate fails here |
+| **Round-trip time** | Median and spread over 5 samples. An extra hop through someone else's machine shows up as latency |
+| **Where your traffic exits** | Public address and network operator. If that isn't your home, carrier or workplace, something is routing you elsewhere |
+| **Encrypted DNS** | Queries Cloudflare DoH for a name whose answer is fixed worldwide. A wrong answer means DNS rewriting; a blocked query means the network filters traffic |
+| **Device clock** | Compared against the server's clock. A badly wrong clock breaks certificate expiry checks |
+
+Every row states what it proves *and what it doesn't*. Where the browser can't answer, the row says so rather than inventing a result.
+
+**The twelve checks** — grouped by urgency, each with the exact Settings path, what a clean result looks like, and what a bad one looks like
+- `01 Shut the door` — AirDrop receiving, configuration profiles, Apple Account device list
+- `02 Find what's there` — Safety Check, full app list, privacy permissions, keyboards with Full Access, location sharing and Screen Time
+- `03 Close it behind you` — revoke trusted computers, passcode strength, iOS updates, Lockdown Mode
+
+Progress is saved in the browser, so you can stop and come back.
+
+**Honest limits** — stated on the page itself. iOS sandboxes every app, so nothing can enumerate all files on the phone. What a payload *can't* hide is the profile, signature or permission it needs to work, and that is what the checks target.
+
+---
+
+### SENTINEL — Phone Intrusion Scanner
+
+A desktop tool, not a browser module. Plug the phone in over USB and run
+`sentinel/sentinel scan` to find out what was put on it via AirDrop, Quick Share,
+Bluetooth or WiFi.
+
+The browser cannot do this job. iOS and Android sandbox every app, so nothing
+running on the phone — including the rest of VIGIL — can read another app's
+storage. Reading real device state requires talking to the phone from outside,
+over adb (Android) or lockdown (iOS). SENTINEL does that and states its limits
+plainly rather than faking coverage it doesn't have.
+
+```bash
+cd sentinel
+./sentinel scan --baseline    # record a known-good reference, once
+./sentinel scan               # later: lists exactly what appeared since
+./sentinel scan --watch 60    # iPhone: watch sharingd for live AirDrop transfers
+```
+
+Its core detector is the baseline diff — a new app or file since a snapshot you
+trust is evidence, not a heuristic. Full documentation: [`sentinel/README.md`](sentinel/README.md).
+
+---
+
 ## Architecture
 
 ```
@@ -170,10 +225,12 @@ vigil/
 ├── manifest.json               ← PWA
 ├── sw.js                       ← Service worker (vigil-v1)
 ├── vercel.json                 ← COOP/COEP headers, camera/mic Permissions-Policy
-└── modules/
-    ├── liminal/engine.js       ← Full LIMINAL detection engine (2100+ lines)
-    ├── amplify/engine.js       ← Full AMPLIFY DSP engine (700+ lines)
-    └── nightvision/engine.js  ← Full NVS camera engine (500+ lines)
+├── sweep.html                  ← SWEEP: live network check + 12-step iPhone audit
+├── modules/
+│   ├── liminal/engine.js       ← Full LIMINAL detection engine (2100+ lines)
+│   ├── amplify/engine.js       ← Full AMPLIFY DSP engine (700+ lines)
+│   └── nightvision/engine.js  ← Full NVS camera engine (500+ lines)
+└── sentinel/                   ← SENTINEL: desktop phone-intrusion scanner (Python)
 ```
 
 **Module contract** — every engine exports `{ init(container), destroy(), health() }`.
@@ -207,6 +264,7 @@ These are required for AudioWorklet, SharedArrayBuffer, and camera access on all
 | Background | `#0D0A14` obsidian |
 | Surface | `#13101E` |
 | Accent | `#C9A84C` gold |
+| Sweep accent | `#FFA62B` amber |
 | Display font | Cinzel 700 |
 | UI font | DM Mono 400 |
 | Health nominal | `#3DBA7A` |
