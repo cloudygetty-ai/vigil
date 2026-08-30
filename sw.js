@@ -1,7 +1,7 @@
-const CACHE = 'vigil-v2';
+const CACHE = 'vigil-v3';
 const SHELL = [
   '/', '/index.html', '/manifest.json',
-  '/liminal.html', '/amplify.html', '/nightvision.html'
+  '/liminal.html', '/amplify.html', '/nightvision.html', '/sweep.html'
 ];
 
 self.addEventListener('install', e => {

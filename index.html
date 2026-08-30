@@ -15,6 +15,7 @@
 <link rel="prefetch" href="liminal.html">
 <link rel="prefetch" href="amplify.html">
 <link rel="prefetch" href="nightvision.html">
+<link rel="prefetch" href="sweep.html">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 
@@ -204,7 +205,7 @@ html,body{
 /* Sliding indicator */
 .indicator{
   position:absolute;top:0;
-  width:33.3333%;height:2px;
+  width:25%;height:2px;
   background:var(--ac);
   box-shadow:0 0 10px var(--ac);
   transition:transform .32s cubic-bezier(.34,1.2,.64,1),background .35s,box-shadow .35s;
@@ -282,6 +283,10 @@ html,body{
       <div class="loader-ring"></div>
       <div class="loader-label">NIGHT VISION</div>
     </div>
+    <div class="loader gone" id="ld-sweep">
+      <div class="loader-ring"></div>
+      <div class="loader-label">SWEEP</div>
+    </div>
 
     <iframe class="slot" id="f-liminal"
       src="liminal.html"
@@ -298,6 +303,10 @@ html,body{
       sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"
       allow="camera;microphone;geolocation;magnetometer;gyroscope;accelerometer;device-orientation;fullscreen"
       allowfullscreen loading="lazy"></iframe>
+
+    <iframe class="slot" id="f-sweep"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+      loading="lazy"></iframe>
   </div>
 
   <nav id="tabs">
@@ -329,6 +338,15 @@ html,body{
       </div>
       Night Vision
     </button>
+
+    <button class="tab" data-id="sweep" data-i="3"
+            data-ac="#ffa62b" data-ag="rgba(255,166,43,0.1)" data-ab="rgba(255,166,43,0.18)"
+            data-sub="iPhone Safety Sweep">
+      <div class="tab-ic">
+        <svg viewBox="0 0 24 24"><path d="M12 2.5 4 5.6v6.1c0 4.7 3.4 8.2 8 9.8 4.6-1.6 8-5.1 8-9.8V5.6L12 2.5z"/><polyline points="8.6 11.8 11 14.2 15.6 9.6"/></svg>
+      </div>
+      Sweep
+    </button>
   </nav>
 </div>
 
@@ -340,6 +358,7 @@ const CFG = {
   liminal:     { i:0, src:'liminal.html',     ac:'#00d4ff', ag:'rgba(0,212,255,0.1)',    ab:'rgba(0,212,255,0.18)',    sub:'Hidden Door Detection' },
   amplify:     { i:1, src:'amplify.html',     ac:'#a855f7', ag:'rgba(168,85,247,0.1)',  ab:'rgba(168,85,247,0.18)',  sub:'Audio DSP Engine' },
   nightvision: { i:2, src:'nightvision.html', ac:'#22d66c', ag:'rgba(34,214,108,0.1)',  ab:'rgba(34,214,108,0.18)',  sub:'NVG Camera System' },
+  sweep:       { i:3, src:'sweep.html',       ac:'#ffa62b', ag:'rgba(255,166,43,0.1)',  ab:'rgba(255,166,43,0.18)',  sub:'iPhone Safety Sweep' },
 };
 
 const loaded = new Set();
@@ -451,6 +470,8 @@ $('f-liminal').addEventListener('load', () => {
     if (!fa.src) fa.src = 'amplify.html';
     const fn = $('f-nightvision');
     if (!fn.src) fn.src = 'nightvision.html';
+    const fs = $('f-sweep');
+    if (!fs.src) fs.src = 'sweep.html';
   }, 800);
 }, {once:true});
 </script>

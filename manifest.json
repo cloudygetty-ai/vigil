@@ -1,7 +1,7 @@
 {
   "name": "VIGIL",
   "short_name": "VIGIL",
-  "description": "Multi-sensor awareness: hidden door detection, audio DSP, night vision",
+  "description": "Multi-sensor awareness: hidden door detection, audio DSP, night vision, iPhone safety sweep",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0D0A14",
