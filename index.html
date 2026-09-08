@@ -11,10 +11,11 @@
 <title>VIGIL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-<!-- Prefetch all three modules so switching is instant -->
+<!-- Prefetch every module so switching is instant -->
 <link rel="prefetch" href="liminal.html">
 <link rel="prefetch" href="amplify.html">
 <link rel="prefetch" href="nightvision.html">
+<link rel="prefetch" href="dualcam.html">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 
@@ -38,6 +39,9 @@
   --lime:#22d66c;
   --lime-g:rgba(34,214,108,0.1);
   --lime-b:rgba(34,214,108,0.18);
+  --amber:#f59e0b;
+  --amber-g:rgba(245,158,11,0.1);
+  --amber-b:rgba(245,158,11,0.18);
 
   /* Status */
   --ok:#22d66c;
@@ -204,7 +208,7 @@ html,body{
 /* Sliding indicator */
 .indicator{
   position:absolute;top:0;
-  width:33.3333%;height:2px;
+  width:25%;height:2px;
   background:var(--ac);
   box-shadow:0 0 10px var(--ac);
   transition:transform .32s cubic-bezier(.34,1.2,.64,1),background .35s,box-shadow .35s;
@@ -282,6 +286,10 @@ html,body{
       <div class="loader-ring"></div>
       <div class="loader-label">NIGHT VISION</div>
     </div>
+    <div class="loader gone" id="ld-dualcam">
+      <div class="loader-ring"></div>
+      <div class="loader-label">DUAL CAM</div>
+    </div>
 
     <iframe class="slot" id="f-liminal"
       src="liminal.html"
@@ -297,6 +305,11 @@ html,body{
     <iframe class="slot" id="f-nightvision"
       sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"
       allow="camera;microphone;geolocation;magnetometer;gyroscope;accelerometer;device-orientation;fullscreen"
+      allowfullscreen loading="lazy"></iframe>
+
+    <iframe class="slot" id="f-dualcam"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"
+      allow="camera;microphone;geolocation;magnetometer;gyroscope;accelerometer;device-orientation;fullscreen;display-capture"
       allowfullscreen loading="lazy"></iframe>
   </div>
 
@@ -329,6 +342,15 @@ html,body{
       </div>
       Night Vision
     </button>
+
+    <button class="tab" data-id="dualcam" data-i="3"
+            data-ac="#f59e0b" data-ag="rgba(245,158,11,0.1)" data-ab="rgba(245,158,11,0.18)"
+            data-sub="Dual Camera Studio">
+      <div class="tab-ic">
+        <svg viewBox="0 0 24 24"><rect x="2" y="6" width="12" height="9" rx="2"/><rect x="10" y="10" width="12" height="9" rx="2"/></svg>
+      </div>
+      Dual Cam
+    </button>
   </nav>
 </div>
 
@@ -340,7 +362,9 @@ const CFG = {
   liminal:     { i:0, src:'liminal.html',     ac:'#00d4ff', ag:'rgba(0,212,255,0.1)',    ab:'rgba(0,212,255,0.18)',    sub:'Hidden Door Detection' },
   amplify:     { i:1, src:'amplify.html',     ac:'#a855f7', ag:'rgba(168,85,247,0.1)',  ab:'rgba(168,85,247,0.18)',  sub:'Audio DSP Engine' },
   nightvision: { i:2, src:'nightvision.html', ac:'#22d66c', ag:'rgba(34,214,108,0.1)',  ab:'rgba(34,214,108,0.18)',  sub:'NVG Camera System' },
+  dualcam:     { i:3, src:'dualcam.html',     ac:'#f59e0b', ag:'rgba(245,158,11,0.1)',  ab:'rgba(245,158,11,0.18)',  sub:'Dual Camera Studio' },
 };
+const TAB_COUNT = Object.keys(CFG).length;
 
 const loaded = new Set();
 let active = null;
@@ -354,6 +378,7 @@ function setTheme(c) {
   $('sub').textContent = c.sub;
   $('sub').style.color = c.ac;
   $('ind').style.transform = `translateX(${c.i * 100}%)`;
+  $('ind').style.width = (100 / TAB_COUNT) + '%';
   $('ind').style.background = c.ac;
   $('ind').style.boxShadow = `0 0 10px ${c.ac}`;
 }
@@ -451,6 +476,8 @@ $('f-liminal').addEventListener('load', () => {
     if (!fa.src) fa.src = 'amplify.html';
     const fn = $('f-nightvision');
     if (!fn.src) fn.src = 'nightvision.html';
+    const fd = $('f-dualcam');
+    if (!fd.src) fd.src = 'dualcam.html';
   }, 800);
 }, {once:true});
 </script>
