@@ -1,7 +1,7 @@
 # VIGIL
 ### Multi-Sensor Awareness Platform
 
-> LIMINAL · AMPLIFY · NIGHT VISION — every feature, one shell.
+> LIMINAL · AMPLIFY · NIGHT VISION · DUAL CAM — every feature, one shell.
 
 ---
 
@@ -162,14 +162,68 @@
 
 ---
 
+### DUAL CAM — Dual Camera Studio
+
+Standalone at `/dualcam.html`, also mounted as the fourth VIGIL tab. Zero dependencies, one canvas compositor, everything on-device.
+
+**Setup**
+1. Tap **DUAL CAM** — grant camera (and microphone, if you record with audio)
+2. Rear camera becomes **CAM A**, front camera becomes **CAM B**
+3. If the device can only serve one stream at a time, DUALCAM drops to SOLO automatically and says so
+
+**Composition**
+| Layout | Behaviour |
+|---|---|
+| **SPLIT** | Two tiles. AUTO axis = side-by-side in landscape, stacked in portrait. Seam ratio 15–85% |
+| **PIP** | One full feed with the other inset. Drag the inset anywhere, or snap to a corner. Size 15–60%, shape rect / rounded / circle |
+| **BLEND** | Both feeds in one frame — screen, multiply, difference, lighten, overlay — with an opacity mix |
+| **SOLO A / SOLO B** | One feed full-frame. Double-tap any tile to isolate, double-tap again to return |
+
+Output aspect locks to SCREEN, 16:9, 4:3, 1:1 or 9:16 — stills and video inherit it. `SWAP A ↔ B` exchanges which feed is primary without touching either camera's settings.
+
+**Per-camera image chain** — every control below is independent per feed
+- **Looks** — NONE, NVG, THERMAL, RAINBOW, FUSION, AMBER, PHOSPHOR, MONO, SEPIA, ICE, INVERT
+- **Adjustments** — brightness, contrast, saturation, gamma, sharpen (unsharp mask)
+- **EDGES** — Sobel overlay · **DENOISE** — temporal blend · **FREEZE** — hold the frame (still records, still captures)
+- **Geometry** — mirror (front cameras start mirrored), rotation 0/90/180/270
+- **Zoom** — 1×–12×, hardware zoom where the track exposes it, digital crop otherwise. Pinch a tile to zoom only that feed
+- **Hardware** — exposure compensation, focus mode and white balance appear only when the camera reports the capability. Tap a tile for point focus
+- **LINK A+B** mirrors adjustments across both feeds; **COPY A → B** clones one camera's look onto the other
+
+**Detection**
+- Independent frame-difference detector per camera on a 96×72 grid
+- Sensitivity sets the difference threshold, trigger area sets the minimum blob size
+- Blobs labelled `TGT-A…TGT-F`, ranked CRIT → TRK by area
+- **AUTO-CAP** saves a full-resolution still from the camera that fired, with a per-camera cooldown
+- Overlays: reticle, corner brackets, luma histogram, roll level, compass strip, grid (thirds / 4×4 / golden / cross)
+
+**Capture**
+| Control | Behaviour |
+|---|---|
+| Shutter | Writes the composite exactly as framed |
+| ALSO SAVE A+B | Adds a full-resolution frame per camera alongside the composite |
+| Format | JPEG / PNG / WEBP with a quality slider |
+| Self-timer | 3 / 5 / 10 s with an on-screen count |
+| Burst | ×3 / ×5 / ×10 at a chosen interval |
+| Video — COMPOSITE | One file of the composited frame, 2.5–24 Mbps, optional mic audio |
+| Video — SEPARATE | Two files at once, one per camera, each at its own native resolution with its processing applied |
+| Pause | The timer button pauses and resumes a recording without splitting the file |
+| Stamps | Live timestamp, GPS coordinates and a custom watermark burned into stills and every video frame |
+
+**Output** — gallery with download, system share sheet and delete. `KEEP GALLERY` mirrors captures into IndexedDB so they survive a reload; `AUTO-DOWNLOAD` writes each capture straight to disk.
+
+**Keys** — `Space` shutter · `R` record · `P` pause · `1–5` split/pip/blend/solo A/solo B · `S` swap · `G` grid · `T` torch · `M` motion · `C` controls · `F` fullscreen · `H` help · `Esc` close
+
+
 ## Architecture
 
 ```
 vigil/
 ├── index.html                  ← Shell, tab router, obsidian/gold, health dot
 ├── manifest.json               ← PWA
-├── sw.js                       ← Service worker (vigil-v1)
+├── sw.js                       ← Service worker (vigil-v3)
 ├── vercel.json                 ← COOP/COEP headers, camera/mic Permissions-Policy
+├── dualcam.html                ← DUAL CAM — standalone dual camera studio (no dependencies)
 └── modules/
     ├── liminal/engine.js       ← Full LIMINAL detection engine (2100+ lines)
     ├── amplify/engine.js       ← Full AMPLIFY DSP engine (700+ lines)
@@ -225,6 +279,7 @@ These are required for AudioWorklet, SharedArrayBuffer, and camera access on all
 | `P2` | Full Hough + GLCM + magnetometer pipeline wired end-to-end in LIMINAL |
 | `P3` | Swipe gesture tab navigation |
 | `P3` | PWA icon set (assets/icon-512.png) |
+| `P3` | Wire SUSURRUS into the shell tab bar |
 
 ---
 

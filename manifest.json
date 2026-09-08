@@ -1,7 +1,7 @@
 {
   "name": "VIGIL",
   "short_name": "VIGIL",
-  "description": "Multi-sensor awareness: hidden door detection, audio DSP, night vision",
+  "description": "Multi-sensor awareness: hidden door detection, audio DSP, night vision, dual camera studio",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0D0A14",
@@ -9,5 +9,9 @@
   "orientation": "portrait-primary",
   "icons": [
     { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Dual Camera", "short_name": "DUALCAM", "description": "Front + rear camera studio", "url": "/dualcam.html" },
+    { "name": "Night Vision", "short_name": "NVS", "description": "NVG camera system", "url": "/nightvision.html" }
   ]
 }
